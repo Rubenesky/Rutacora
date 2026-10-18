@@ -5,6 +5,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { createBaseLayers } from './useMapLayers'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { guardarCapaElegida, leerCapaGuardada } from '@/lib/preferenciaCapaMapa'
 import { supabase } from '@/lib/supabaseClient'
 import type { Ruta } from '@/types/database.types'
 
@@ -85,12 +86,14 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
   })
 
   const baseLayers = createBaseLayers()
-  const primeraCapa = Object.values(baseLayers)[0]
-  if (primeraCapa) primeraCapa.addTo(map)
+  const nombreGuardado = leerCapaGuardada()
+  const capaInicial = (nombreGuardado && baseLayers[nombreGuardado]) || Object.values(baseLayers)[0]
+  if (capaInicial) capaInicial.addTo(map)
   // "bottomleft": el zoom ocupa arriba-izquierda, la atribución abajo-derecha
   // y el botón "Salir" de la app arriba-derecha. Así ningún control se solapa
   // con otro en ningún tamaño de pantalla.
   L.control.layers(baseLayers, undefined, { position: 'bottomleft' }).addTo(map)
+  map.on('baselayerchange', (evento) => guardarCapaElegida(evento.name))
 
   const clusterGroup = L.markerClusterGroup()
   map.addLayer(clusterGroup)

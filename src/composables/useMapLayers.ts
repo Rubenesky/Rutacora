@@ -40,9 +40,37 @@ export function createBaseLayers(): Record<string, L.TileLayer> {
     },
   )
 
+  // Capa IGN (ortofoto satélite/aérea PNOA).
+  //
+  // Igual que la capa topográfica: el IGN no publica una URL XYZ lista para
+  // Leaflet, solo el servicio WMTS oficial, verificado en vivo contra su
+  // GetCapabilities:
+  //   https://www.ign.es/wmts/pnoa-ma?service=WMTS&request=GetCapabilities
+  // De ese documento se confirman: la capa "OI.OrthoimageCoverage" (combina
+  // PNOA de máxima actualidad con Sentinel-2), el tilematrixset
+  // "GoogleMapsCompatible" y el formato "image/jpeg". El TileMatrixSetLimits
+  // de esa capa para ese tilematrixset da MaxTileMatrix = 20: ese es el zoom
+  // nativo máximo real (no el "~19" que aparece en el texto descriptivo del
+  // servicio), por eso maxNativeZoom se fija en 20. maxZoom se deja algo por
+  // encima (22) para que, si se hace más zoom, Leaflet amplíe la última
+  // tesela real en vez de mostrar un hueco gris.
+  // Atribución y licencia confirmadas en el AccessConstraints del propio
+  // GetCapabilities: "CC BY 4.0 scne.es".
+  const pnoa = L.tileLayer(
+    'https://www.ign.es/wmts/pnoa-ma?service=WMTS&request=GetTile&version=1.0.0' +
+      '&layer=OI.OrthoimageCoverage&style=default&format=image/jpeg' +
+      '&tilematrixset=GoogleMapsCompatible&tilematrix={z}&tilerow={y}&tilecol={x}',
+    {
+      maxZoom: 22,
+      maxNativeZoom: 20,
+      attribution: '&copy; Instituto Geográfico Nacional de España (IGN) · PNOA · CC BY 4.0 scne.es',
+    },
+  )
+
   return {
     'OpenStreetMap': osm,
     'OpenTopoMap': openTopoMap,
     'IGN (Mapa Topográfico Nacional)': ign,
+    'Satélite (PNOA, IGN)': pnoa,
   }
 }
