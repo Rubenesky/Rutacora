@@ -4,8 +4,10 @@ import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { createBaseLayers } from './useMapLayers'
+import { FOTOS_BUCKET, SIGNED_URL_TTL_SEGUNDOS } from '@/lib/constantes'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { guardarCapaElegida, leerCapaGuardada } from '@/lib/preferenciaCapaMapa'
+import { guardarUrlCacheada, obtenerUrlCacheada } from '@/lib/signedUrlCache'
 import { supabase } from '@/lib/supabaseClient'
 import type { Ruta } from '@/types/database.types'
 
@@ -13,9 +15,6 @@ import type { Ruta } from '@/types/database.types'
 // mediante zoom/paneo (no entran todas a la vez en una vista razonable).
 const CENTRO_ESPANA: L.LatLngTuple = [40.0, -3.7]
 const ZOOM_INICIAL = 6
-
-const FOTOS_BUCKET = 'fotos-rutas'
-const SIGNED_URL_TTL_SEGUNDOS = 60 * 60
 
 export interface OpcionesLeafletMap {
   onEditarRuta?: (ruta: Ruta) => void
@@ -61,6 +60,17 @@ async function cargarFotoEnPopup(popupEl: HTMLElement): Promise<void> {
   const fotoPath = fotoDiv?.dataset.fotoPath
   if (!fotoDiv || !fotoPath) return
 
+  const urlCacheada = obtenerUrlCacheada(fotoPath)
+  if (urlCacheada) {
+    mostrarFotoEnDiv(fotoDiv, urlCacheada)
+    return
+  }
+
+  if (!navigator.onLine) {
+    fotoDiv.textContent = 'Foto no disponible sin conexión.'
+    return
+  }
+
   const { data, error } = await supabase.storage
     .from(FOTOS_BUCKET)
     .createSignedUrl(fotoPath, SIGNED_URL_TTL_SEGUNDOS)
@@ -70,8 +80,13 @@ async function cargarFotoEnPopup(popupEl: HTMLElement): Promise<void> {
     return
   }
 
+  guardarUrlCacheada(fotoPath, data.signedUrl, SIGNED_URL_TTL_SEGUNDOS)
+  mostrarFotoEnDiv(fotoDiv, data.signedUrl)
+}
+
+function mostrarFotoEnDiv(fotoDiv: HTMLElement, url: string): void {
   const img = document.createElement('img')
-  img.src = data.signedUrl
+  img.src = url
   img.alt = 'Foto de la ruta'
   img.loading = 'lazy'
   fotoDiv.replaceChildren(img)

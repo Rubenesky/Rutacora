@@ -1,11 +1,14 @@
 import { ref, toRaw } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { DIFICULTADES } from '@/lib/dificultad'
+import { FOTOS_BUCKET } from '@/lib/constantes'
+import { invalidarUrlCacheada } from '@/lib/signedUrlCache'
 import {
   clearCola as clearColaDb,
   deleteColaItem,
   getColaItems,
   putColaItem,
+  type AccionFotoCola,
   type ColaItem,
   type EstadoCola,
 } from '@/lib/offlineDb'
@@ -26,7 +29,33 @@ export interface GuardarRutaInput {
   notas: string | null
 }
 
-const FOTOS_BUCKET = 'fotos-rutas'
+export type AccionFoto =
+  | { tipo: 'mantener' }
+  | { tipo: 'reemplazar'; blob: Blob }
+  | { tipo: 'quitar' }
+
+/** Error de sincronización que conserva el error original de Supabase para
+ * poder distinguir fallos de red (reintentables) de fallos de permisos. */
+class ErrorSincronizacion extends Error {
+  readonly original?: unknown
+
+  constructor(message: string, original?: unknown) {
+    super(message)
+    this.original = original
+  }
+}
+
+function esErrorDePermisos(original: unknown): boolean {
+  if (!original || typeof original !== 'object') return false
+  const err = original as { status?: number; code?: string; message?: string }
+  if (err.status === 401 || err.status === 403) return true
+  if (err.code === '42501') return true
+  return /permission denied|row-level security|not authorized|unauthorized/i.test(err.message ?? '')
+}
+
+function esErrorDeCuota(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'QuotaExceededError'
+}
 
 const pendientes = ref<ColaItem[]>([])
 const sincronizando = new Set<string>()
@@ -40,11 +69,27 @@ async function refrescarPendientes(): Promise<void> {
   pendientes.value = await getColaItems()
 }
 
+async function guardarEnCola(item: ColaItem): Promise<void> {
+  try {
+    await putColaItem(item)
+  } catch (err) {
+    if (esErrorDeCuota(err)) {
+      throw new Error(
+        'No hay espacio suficiente en el dispositivo para guardar esto sin conexión. ' +
+          'Libera espacio o inténtalo de nuevo con conexión a internet.',
+      )
+    }
+    throw err
+  }
+  await refrescarPendientes()
+}
+
 async function actualizarEstado(
   id: string,
   estado: EstadoCola,
   errorMensaje: string | null,
   incrementarIntentos: boolean,
+  bloqueado = false,
 ): Promise<void> {
   const encontrado = pendientes.value.find((item) => item.id === id)
   if (!encontrado) return
@@ -56,6 +101,7 @@ async function actualizarEstado(
     ...actual,
     estado,
     errorMensaje,
+    bloqueado,
     intentos: incrementarIntentos ? actual.intentos + 1 : actual.intentos,
   })
   await refrescarPendientes()
@@ -72,32 +118,52 @@ async function obtenerUserIdActual(): Promise<string | undefined> {
   }
 }
 
+/** Calcula foto_path a partir de accionFoto, subiendo o borrando la foto en
+ * Storage según corresponda, y devuelve el valor final para la fila. */
+async function resolverFotoAlGuardar(item: ColaItem, userId: string): Promise<string | null> {
+  if (item.accionFoto === 'mantener') {
+    return item.fotoPathExistente
+  }
+
+  if (item.accionFoto === 'quitar') {
+    if (item.fotoPathExistente) {
+      const { error } = await supabase.storage.from(FOTOS_BUCKET).remove([item.fotoPathExistente])
+      if (error) throw new ErrorSincronizacion('No se pudo borrar la foto anterior.', error)
+      invalidarUrlCacheada(item.fotoPathExistente)
+    }
+    return null
+  }
+
+  // 'reemplazar'
+  if (!item.foto) return item.fotoPathExistente
+  const fotoPath = `${userId}/${item.id}.jpg`
+  const { error } = await supabase.storage
+    .from(FOTOS_BUCKET)
+    .upload(fotoPath, item.foto, { upsert: true, contentType: 'image/jpeg' })
+  if (error) throw new ErrorSincronizacion('No se pudo subir la foto.', error)
+  invalidarUrlCacheada(fotoPath)
+  return fotoPath
+}
+
 async function sincronizarGuardado(item: ColaItem, userId: string): Promise<void> {
   if (!item.ruta) return
 
-  const fotoPath = item.foto ? `${userId}/${item.id}.jpg` : null
-
-  // Orden: primero la foto (con upsert, idempotente), después la fila. Si
-  // falla a mitad (foto subida, fila no), el reintento vuelve a subir la
-  // misma foto (no duplica) y reintenta la fila con el mismo id (upsert,
-  // tampoco duplica).
+  // Orden: primero la foto (subida o borrado, según corresponda; subida con
+  // upsert, idempotente), después la fila. Si falla a mitad (foto resuelta,
+  // fila no), el reintento repite la misma operación de Storage (idempotente
+  // en los dos casos) y reintenta la fila con el mismo id (upsert, tampoco
+  // duplica).
   //
   // No se envía "user_id": se deja al valor por defecto de la columna
   // (auth.uid()), que la propia base de datos rellena a partir del usuario
   // autenticado de la petición, en vez de un cálculo hecho en el cliente.
-  if (item.foto && fotoPath) {
-    const { error: errorSubida } = await supabase.storage
-      .from(FOTOS_BUCKET)
-      .upload(fotoPath, item.foto, { upsert: true, contentType: 'image/jpeg' })
-
-    if (errorSubida) throw new Error('No se pudo subir la foto.')
-  }
+  const fotoPath = await resolverFotoAlGuardar(item, userId)
 
   const { error: errorFila } = await supabase
     .from('rutas')
     .upsert({ ...item.ruta, id: item.id, foto_path: fotoPath }, { onConflict: 'id' })
 
-  if (errorFila) throw new Error('No se pudo guardar la ruta.')
+  if (errorFila) throw new ErrorSincronizacion('No se pudo guardar la ruta.', errorFila)
 }
 
 async function sincronizarBorrado(item: ColaItem): Promise<void> {
@@ -106,14 +172,15 @@ async function sincronizarBorrado(item: ColaItem): Promise<void> {
   // (falla el borrado de la foto) queda un archivo huérfano en Storage, sin
   // impacto visible, y el reintento lo limpia.
   const { error: errorFila } = await supabase.from('rutas').delete().eq('id', item.id)
-  if (errorFila) throw new Error('No se pudo borrar la ruta.')
+  if (errorFila) throw new ErrorSincronizacion('No se pudo borrar la ruta.', errorFila)
 
   if (item.fotoPathABorrar) {
     const { error: errorFoto } = await supabase.storage
       .from(FOTOS_BUCKET)
       .remove([item.fotoPathABorrar])
 
-    if (errorFoto) throw new Error('No se pudo borrar la foto.')
+    if (errorFoto) throw new ErrorSincronizacion('No se pudo borrar la foto.', errorFoto)
+    invalidarUrlCacheada(item.fotoPathABorrar)
   }
 }
 
@@ -145,7 +212,16 @@ async function syncOne(item: ColaItem): Promise<void> {
       // Cubre tanto los errores que Supabase devuelve como { error } como
       // los que lanza como excepción (p. ej. "Failed to fetch" sin red).
       const mensaje = err instanceof Error ? err.message : 'Error de red al sincronizar.'
-      await actualizarEstado(item.id, 'error', `${mensaje} Se reintentará.`, true)
+      const original = err instanceof ErrorSincronizacion ? err.original : undefined
+
+      if (esErrorDePermisos(original)) {
+        // Error de política/permisos: no es transitorio, no se reintenta en
+        // bucle automáticamente. Queda visible con el mensaje real; solo un
+        // reintento manual (tras arreglar el permiso) lo vuelve a intentar.
+        await actualizarEstado(item.id, 'error', mensaje, true, true)
+      } else {
+        await actualizarEstado(item.id, 'error', `${mensaje} Se reintentará.`, true, false)
+      }
     }
   } finally {
     sincronizando.delete(item.id)
@@ -155,16 +231,22 @@ async function syncOne(item: ColaItem): Promise<void> {
 async function syncAll(): Promise<void> {
   const items = await getColaItems()
   for (const item of items) {
+    if (item.bloqueado) continue // solo se reintenta manualmente, no en bucle
     await syncOne(item)
   }
 }
 
 /**
  * Único punto de entrada para guardar una ruta (nueva o editada). Escribe
- * PRIMERO en la cola de IndexedDB (con la foto ya comprimida) y después
- * intenta sincronizar. Nunca se llama a Supabase directamente desde la UI.
+ * PRIMERO en la cola de IndexedDB (con la foto ya comprimida, si procede) y
+ * después intenta sincronizar. Nunca se llama a Supabase directamente desde
+ * la UI.
  */
-async function saveRoute(input: GuardarRutaInput, foto: Blob | null): Promise<string> {
+async function saveRoute(
+  input: GuardarRutaInput,
+  accionFoto: AccionFoto,
+  fotoPathExistente: string | null = null,
+): Promise<string> {
   if (!esDificultadValida(input.dificultad)) {
     throw new Error(
       `Dificultad no válida: "${input.dificultad}". Debe ser exactamente una de: ${DIFICULTADES.join(', ')}.`,
@@ -188,20 +270,23 @@ async function saveRoute(input: GuardarRutaInput, foto: Blob | null): Promise<st
     foto_path: null,
   }
 
+  const accionFotoCola: AccionFotoCola = accionFoto.tipo
   const item: ColaItem = {
     id,
     tipo: 'guardar',
     ruta,
-    foto,
+    accionFoto: accionFotoCola,
+    foto: accionFoto.tipo === 'reemplazar' ? accionFoto.blob : null,
+    fotoPathExistente,
     fotoPathABorrar: null,
     estado: 'pendiente',
+    bloqueado: false,
     intentos: 0,
     errorMensaje: null,
     creadoEn: new Date().toISOString(),
   }
 
-  await putColaItem(item)
-  await refrescarPendientes()
+  await guardarEnCola(item)
   await syncAll()
 
   return id
@@ -216,16 +301,18 @@ async function deleteRoute(id: string, fotoPath: string | null): Promise<void> {
     id,
     tipo: 'borrar',
     ruta: null,
+    accionFoto: 'mantener',
     foto: null,
+    fotoPathExistente: null,
     fotoPathABorrar: fotoPath,
     estado: 'pendiente',
+    bloqueado: false,
     intentos: 0,
     errorMensaje: null,
     creadoEn: new Date().toISOString(),
   }
 
-  await putColaItem(item)
-  await refrescarPendientes()
+  await guardarEnCola(item)
   await syncAll()
 }
 
@@ -266,3 +353,7 @@ export async function _resetParaTests(): Promise<void> {
   sincronizando.clear()
   await refrescarPendientes()
 }
+
+/** Solo para tests: permite comprobar la clasificación de errores sin
+ * depender de forzar esas condiciones de verdad en IndexedDB/Supabase. */
+export const _erroresParaTests = { esErrorDePermisos, esErrorDeCuota }

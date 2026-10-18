@@ -3,17 +3,26 @@ import type { RutaInsert } from '@/types/database.types'
 
 export type EstadoCola = 'pendiente' | 'pendiente_login' | 'error'
 export type TipoOperacion = 'guardar' | 'borrar'
+export type AccionFotoCola = 'mantener' | 'reemplazar' | 'quitar'
 
 export interface ColaItem {
   id: string
   tipo: TipoOperacion
   /** Datos de la ruta a guardar. null cuando tipo === 'borrar'. */
   ruta: RutaInsert | null
-  /** Foto de portada a subir. Solo se usa cuando tipo === 'guardar'. */
+  /** Qué hacer con la foto al guardar. Solo se usa cuando tipo === 'guardar'. */
+  accionFoto: AccionFotoCola
+  /** Foto de portada a subir. Solo cuando accionFoto === 'reemplazar'. */
   foto: Blob | null
+  /** foto_path ya existente antes de esta edición (para conservarlo si se
+   * "mantiene", o para saber qué borrar si se "quita"). null en rutas nuevas. */
+  fotoPathExistente: string | null
   /** Ruta del Storage a borrar junto con la fila. Solo cuando tipo === 'borrar'. */
   fotoPathABorrar: string | null
   estado: EstadoCola
+  /** true si el último fallo fue de política/permisos (no transitorio): no
+   * se reintenta automáticamente, solo con un reintento manual explícito. */
+  bloqueado: boolean
   intentos: number
   errorMensaje: string | null
   creadoEn: string

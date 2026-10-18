@@ -1,21 +1,26 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { DIFICULTADES } from '@/lib/dificultad'
+import { FOTOS_BUCKET, SIGNED_URL_TTL_SEGUNDOS } from '@/lib/constantes'
+import { ErrorFoto, procesarFoto } from '@/lib/procesarFoto'
 import { hayErrores, validarRuta } from '@/lib/validacionRuta'
-import type { GuardarRutaInput } from '@/composables/useOfflineQueue'
+import { supabase } from '@/lib/supabaseClient'
+import type { AccionFoto, GuardarRutaInput } from '@/composables/useOfflineQueue'
 import type { Ruta } from '@/types/database.types'
 
 const props = defineProps<{
   inicial: Ruta | null
   lat: number | null
   lon: number | null
+  ubicacionYaElegida: boolean
 }>()
 
 const emit = defineEmits<{
   cerrar: []
-  guardar: [payload: GuardarRutaInput]
+  guardar: [payload: GuardarRutaInput, accionFoto: AccionFoto]
   'update:lat': [number]
   'update:lon': [number]
+  'ubicacion-elegida-por-usuario': []
 }>()
 
 const esEdicion = computed(() => props.inicial !== null)
@@ -33,6 +38,29 @@ const lonTexto = ref('')
 const errorUbicacion = ref('')
 const obteniendoUbicacion = ref(false)
 
+// --- Foto ---
+const fotoPathExistente = computed(() => props.inicial?.foto_path ?? null)
+const fotoExistentePreviewUrl = ref<string | null>(null)
+const fotoNuevaBlob = ref<Blob | null>(null)
+const fotoNuevaPreviewUrl = ref<string | null>(null)
+const fotoQuitada = ref(false)
+const procesandoFoto = ref(false)
+const errorFoto = ref('')
+
+function liberarPreviewNueva(): void {
+  if (fotoNuevaPreviewUrl.value) URL.revokeObjectURL(fotoNuevaPreviewUrl.value)
+  fotoNuevaPreviewUrl.value = null
+}
+
+async function cargarPreviewExistente(): Promise<void> {
+  fotoExistentePreviewUrl.value = null
+  if (!fotoPathExistente.value) return
+  const { data } = await supabase.storage
+    .from(FOTOS_BUCKET)
+    .createSignedUrl(fotoPathExistente.value, SIGNED_URL_TTL_SEGUNDOS)
+  if (data) fotoExistentePreviewUrl.value = data.signedUrl
+}
+
 function cargarDesdeInicial(): void {
   const r = props.inicial
   nombre.value = r?.nombre ?? ''
@@ -43,10 +71,18 @@ function cargarDesdeInicial(): void {
   fecha.value = r?.fecha ?? new Date().toISOString().slice(0, 10)
   dificultad.value = r?.dificultad ?? ''
   notas.value = r?.notas ?? ''
+
+  liberarPreviewNueva()
+  fotoNuevaBlob.value = null
+  fotoQuitada.value = false
+  errorFoto.value = ''
+  void cargarPreviewExistente()
 }
 
 cargarDesdeInicial()
 watch(() => props.inicial, cargarDesdeInicial)
+
+onUnmounted(liberarPreviewNueva)
 
 watch(
   () => props.lat,
@@ -65,12 +101,18 @@ watch(
 
 function onLatInput(): void {
   const valor = Number.parseFloat(latTexto.value)
-  if (!Number.isNaN(valor)) emit('update:lat', valor)
+  if (!Number.isNaN(valor)) {
+    emit('update:lat', valor)
+    emit('ubicacion-elegida-por-usuario')
+  }
 }
 
 function onLonInput(): void {
   const valor = Number.parseFloat(lonTexto.value)
-  if (!Number.isNaN(valor)) emit('update:lon', valor)
+  if (!Number.isNaN(valor)) {
+    emit('update:lon', valor)
+    emit('ubicacion-elegida-por-usuario')
+  }
 }
 
 function usarMiUbicacion(): void {
@@ -87,6 +129,7 @@ function usarMiUbicacion(): void {
       obteniendoUbicacion.value = false
       emit('update:lat', posicion.coords.latitude)
       emit('update:lon', posicion.coords.longitude)
+      emit('ubicacion-elegida-por-usuario')
     },
     (error) => {
       obteniendoUbicacion.value = false
@@ -102,7 +145,50 @@ function usarMiUbicacion(): void {
   )
 }
 
+async function onArchivoSeleccionado(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const archivo = input.files?.[0]
+  if (!archivo) return
+
+  errorFoto.value = ''
+  procesandoFoto.value = true
+
+  try {
+    const resultado = await procesarFoto(archivo)
+    liberarPreviewNueva()
+    fotoNuevaBlob.value = resultado.blob
+    fotoNuevaPreviewUrl.value = URL.createObjectURL(resultado.blob)
+    fotoQuitada.value = false
+
+    // Autorrelleno de ubicación con el GPS del EXIF SOLO si el usuario no ha
+    // fijado una ubicación todavía (ni tocando el mapa, ni a mano, ni con
+    // "Usar mi ubicación", ni porque ya es una ruta existente).
+    if (resultado.ubicacionExif && !props.ubicacionYaElegida) {
+      emit('update:lat', resultado.ubicacionExif.lat)
+      emit('update:lon', resultado.ubicacionExif.lon)
+    }
+  } catch (err) {
+    errorFoto.value = err instanceof ErrorFoto ? err.message : 'No se pudo procesar la foto.'
+  } finally {
+    procesandoFoto.value = false
+    input.value = ''
+  }
+}
+
+function quitarFoto(): void {
+  liberarPreviewNueva()
+  fotoNuevaBlob.value = null
+  fotoQuitada.value = true
+  errorFoto.value = ''
+}
+
 const errores = ref<ReturnType<typeof validarRuta>>({})
+
+function calcularAccionFoto(): AccionFoto {
+  if (fotoNuevaBlob.value) return { tipo: 'reemplazar', blob: fotoNuevaBlob.value }
+  if (fotoQuitada.value) return { tipo: 'quitar' }
+  return { tipo: 'mantener' }
+}
 
 function onGuardar(): void {
   const datos = {
@@ -119,19 +205,23 @@ function onGuardar(): void {
   errores.value = validarRuta(datos)
   if (hayErrores(errores.value)) return
 
-  emit('guardar', {
-    id: props.inicial?.id,
-    nombre: datos.nombre.trim(),
-    lat: datos.lat as number,
-    lon: datos.lon as number,
-    distancia_km: datos.distancia_km as number,
-    desnivel_m: datos.desnivel_m,
-    duracion_min: datos.duracion_min,
-    tipo: tipo.value === '' ? null : tipo.value,
-    fecha: datos.fecha,
-    dificultad: dificultad.value as GuardarRutaInput['dificultad'],
-    notas: notas.value.trim() === '' ? null : notas.value.trim(),
-  })
+  emit(
+    'guardar',
+    {
+      id: props.inicial?.id,
+      nombre: datos.nombre.trim(),
+      lat: datos.lat as number,
+      lon: datos.lon as number,
+      distancia_km: datos.distancia_km as number,
+      desnivel_m: datos.desnivel_m,
+      duracion_min: datos.duracion_min,
+      tipo: tipo.value === '' ? null : tipo.value,
+      fecha: datos.fecha,
+      dificultad: dificultad.value as GuardarRutaInput['dificultad'],
+      notas: notas.value.trim() === '' ? null : notas.value.trim(),
+    },
+    calcularAccionFoto(),
+  )
 }
 </script>
 
@@ -222,6 +312,64 @@ function onGuardar(): void {
             class="campo-error"
           >
             {{ errores.ubicacion }}
+          </p>
+        </fieldset>
+
+        <fieldset class="campo-foto">
+          <legend>Foto de portada (opcional)</legend>
+
+          <div
+            v-if="fotoNuevaPreviewUrl"
+            class="foto-preview"
+          >
+            <img
+              :src="fotoNuevaPreviewUrl"
+              alt="Foto nueva seleccionada"
+            >
+          </div>
+          <div
+            v-else-if="fotoExistentePreviewUrl && !fotoQuitada"
+            class="foto-preview"
+          >
+            <img
+              :src="fotoExistentePreviewUrl"
+              alt="Foto actual de la ruta"
+            >
+          </div>
+          <p
+            v-else-if="fotoQuitada"
+            class="ayuda"
+          >
+            Se quitará la foto al guardar.
+          </p>
+
+          <input
+            type="file"
+            accept="image/*"
+            :disabled="procesandoFoto"
+            @change="onArchivoSeleccionado"
+          >
+
+          <button
+            v-if="fotoNuevaPreviewUrl || (fotoExistentePreviewUrl && !fotoQuitada)"
+            type="button"
+            class="boton-quitar-foto"
+            @click="quitarFoto"
+          >
+            Quitar foto
+          </button>
+
+          <p
+            v-if="procesandoFoto"
+            class="ayuda"
+          >
+            Procesando foto…
+          </p>
+          <p
+            v-if="errorFoto"
+            class="campo-error"
+          >
+            {{ errorFoto }}
           </p>
         </fieldset>
 
@@ -430,11 +578,36 @@ function onGuardar(): void {
 }
 
 .campo-ubicacion,
+.campo-foto,
 .campo-radio {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: var(--space-2);
   margin: 0;
+}
+
+.campo-foto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.campo-foto input[type='file'] {
+  min-height: var(--tap-min);
+}
+
+.foto-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: var(--radius);
+  display: block;
+}
+
+.boton-quitar-foto {
+  background: var(--color-surface);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  align-self: flex-start;
 }
 
 .campo-radio {

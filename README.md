@@ -67,8 +67,34 @@ El formulario (`RouteFormModal.vue`) y el mapa (`MapView.vue`) llaman siempre a 
 
 Botón "+ Añadir ruta" bajo el mapa, y "Editar"/"Borrar" en el popup de cada ruta. Tres formas de fijar la ubicación (todas rellenan el mismo lat/lon): tocar el mapa, arrastrar el marcador, o el botón "Usar mi ubicación" (si el permiso de geolocalización se deniega, se muestra un aviso y se puede seguir con el mapa o las coordenadas a mano). Validación en cliente (nombre, rango de lat/lon, distancia > 0, fecha obligatoria, dificultad de la lista canónica).
 
+## Fotos
+
+`src/lib/procesarFoto.ts` procesa la foto elegida en el formulario (una sola, opcional, campo `<input type="file" accept="image/*">` sin `capture`, así el navegador ofrece cámara o galería):
+
+1. Valida que sea una imagen y que no supere 40 MB.
+2. Lee el EXIF (GPS y orientación) con `exifr`. El GPS solo se usa para autorrellenar la ubicación si aún no hay una elegida; nunca se sube.
+3. Decodifica, corrige la orientación, redimensiona a máximo 1600px en el lado largo (sin recortar) y recodifica como JPEG vía `canvas` probando calidad 0.8 → 0.6 → 0.4 hasta respetar un techo de 0.5 MB (sin perseguir un peso exacto). El `canvas` nunca conserva EXIF/GPS en la salida.
+
+El Blob resultante va a `saveRoute()` (cola offline) como `{ tipo: 'reemplazar', blob }`, junto con el `foto_path` existente si se está editando, para que la cola decida subir, mantener o borrar la foto al sincronizar — nunca se sube directamente desde la UI.
+
+### Probarlo con una foto real
+
+1. `npm run dev`, entra, pulsa "+ Añadir ruta" y elige una foto real del móvil o del equipo (con GPS si quieres comprobar el autorrelleno).
+2. Comprueba que, si no habías fijado ubicación, el marcador se mueve a la posición de la foto.
+3. Guarda la ruta y abre su popup: la foto debe cargar (vía URL firmada).
+4. Edita esa ruta: deberías ver la foto actual, con botones para cambiarla o quitarla.
+
+### Comprobar que el bucket es privado
+
+En el panel de Supabase → **Storage** → bucket `fotos-rutas`: debe aparecer marcado como **privado** (no público). Si copias la URL pública de un archivo y la abres en una ventana privada sin sesión, debe fallar (403/404), no mostrar la imagen.
+
+### Comprobar que el archivo subido no tiene GPS/EXIF
+
+1. En el panel de Supabase → Storage → `fotos-rutas/{tu_user_id}/{id_de_la_ruta}.jpg`, descarga ese archivo.
+2. Comprueba sus metadatos con cualquier visor de EXIF (en el explorador de archivos de Windows: botón derecho → Propiedades → Detalles; no debería mostrar datos de GPS, y la sección de cámara debería estar vacía o ser mínima comparada con el original).
+3. Alternativa más rigurosa: con Node instalado, `npx exifr gps ruta/al/archivo.jpg` (usando el paquete `exifr` que ya usa el proyecto) debe devolver `undefined`/nada.
+
 ## Pendiente de documentar (bloques siguientes)
 
-- Fotos (EXIF + compresión) en el formulario.
 - Configuración de variables en Netlify y despliegue.
 - Verificación del keep-alive (Netlify Scheduled Function contra `public.keepalive`).

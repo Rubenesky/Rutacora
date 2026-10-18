@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useLeafletMap } from '@/composables/useLeafletMap'
 import { useRoutes } from '@/composables/useRoutes'
-import { useOfflineQueue, type GuardarRutaInput } from '@/composables/useOfflineQueue'
+import { useOfflineQueue, type AccionFoto, type GuardarRutaInput } from '@/composables/useOfflineQueue'
 import RouteFormModal from './RouteFormModal.vue'
 import type { Ruta } from '@/types/database.types'
 
@@ -16,6 +16,10 @@ const formAbierto = ref(false)
 const formInicial = ref<Ruta | null>(null)
 const seleccionLat = ref<number | null>(null)
 const seleccionLon = ref<number | null>(null)
+// true si la ubicación ya viene de una edición existente, o si el usuario la
+// ha fijado a mano/mapa/geolocalización durante esta sesión del formulario.
+// Mientras sea false, una foto con GPS en el EXIF puede autorrellenarla.
+const ubicacionElegida = ref(false)
 
 function onEditarRuta(ruta: Ruta): void {
   abrirFormulario(ruta)
@@ -44,6 +48,7 @@ watch([seleccionLat, seleccionLon], ([lat, lon]) => {
 
 function abrirFormulario(ruta: Ruta | null): void {
   formInicial.value = ruta
+  ubicacionElegida.value = ruta !== null
   const centro = leafletMap?.map.getCenter()
   seleccionLat.value = ruta?.lat ?? centro?.lat ?? null
   seleccionLon.value = ruta?.lon ?? centro?.lng ?? null
@@ -53,6 +58,7 @@ function abrirFormulario(ruta: Ruta | null): void {
     leafletMap?.iniciarSeleccionUbicacion(seleccionLat.value, seleccionLon.value, (lat, lon) => {
       seleccionLat.value = lat
       seleccionLon.value = lon
+      ubicacionElegida.value = true
     })
   }
 }
@@ -63,7 +69,7 @@ function cerrarFormulario(): void {
   leafletMap?.finalizarSeleccionUbicacion()
 }
 
-function aRutaCompleta(payload: GuardarRutaInput, id: string): Ruta {
+function aRutaCompleta(payload: GuardarRutaInput, id: string, fotoPath: string | null): Ruta {
   return {
     id,
     user_id: '',
@@ -77,18 +83,20 @@ function aRutaCompleta(payload: GuardarRutaInput, id: string): Ruta {
     fecha: payload.fecha,
     dificultad: payload.dificultad,
     notas: payload.notas,
-    foto_path: null,
+    foto_path: fotoPath,
     created_at: new Date().toISOString(),
   }
 }
 
-async function onGuardarFormulario(payload: GuardarRutaInput): Promise<void> {
+async function onGuardarFormulario(payload: GuardarRutaInput, accionFoto: AccionFoto): Promise<void> {
   const id = payload.id ?? crypto.randomUUID()
+  const fotoPathExistente = formInicial.value?.foto_path ?? null
+  const fotoPathOptimista = accionFoto.tipo === 'quitar' ? null : fotoPathExistente
 
   // Actualización optimista: el marcador aparece/se actualiza al instante,
   // haya red o no. Con red, fetchRutas() la confirma enseguida con los
   // datos reales; sin red, se queda así hasta que la cola sincronice.
-  const optimista = aRutaCompleta(payload, id)
+  const optimista = aRutaCompleta(payload, id, fotoPathOptimista)
   const yaExiste = rutas.value.some((r) => r.id === id)
   rutas.value = yaExiste
     ? rutas.value.map((r) => (r.id === id ? optimista : r))
@@ -96,7 +104,7 @@ async function onGuardarFormulario(payload: GuardarRutaInput): Promise<void> {
 
   cerrarFormulario()
 
-  await saveRoute({ ...payload, id }, null)
+  await saveRoute({ ...payload, id }, accionFoto, fotoPathExistente)
   await fetchRutas()
 }
 
@@ -148,8 +156,10 @@ onUnmounted(() => {
     v-model:lat="seleccionLat"
     v-model:lon="seleccionLon"
     :inicial="formInicial"
+    :ubicacion-ya-elegida="ubicacionElegida"
     @cerrar="cerrarFormulario"
     @guardar="onGuardarFormulario"
+    @ubicacion-elegida-por-usuario="ubicacionElegida = true"
   />
 </template>
 

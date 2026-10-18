@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { vi } from 'vitest'
 import { getColaItems } from '@/lib/offlineDb'
 import type { Dificultad } from '@/types/database.types'
 
@@ -25,7 +26,13 @@ vi.mock('@/lib/supabaseClient', () => ({
   },
 }))
 
-const { useOfflineQueue, _resetParaTests } = await import('./useOfflineQueue')
+const { useOfflineQueue, _resetParaTests, _erroresParaTests } = await import('./useOfflineQueue')
+
+const MANTENER = { tipo: 'mantener' } as const
+const QUITAR = { tipo: 'quitar' } as const
+function reemplazar(blob: Blob) {
+  return { tipo: 'reemplazar' as const, blob }
+}
 
 const inputBase = {
   nombre: 'Ruta de prueba',
@@ -60,7 +67,7 @@ beforeEach(async () => {
 describe('useOfflineQueue', () => {
   it('guarda primero en la cola y sincroniza usando el id generado en cliente', async () => {
     const { saveRoute } = useOfflineQueue()
-    const id = await saveRoute({ ...inputBase }, null)
+    const id = await saveRoute({ ...inputBase }, MANTENER)
 
     expect(mockUpsert).toHaveBeenCalledTimes(1)
     expect(mockUpsert.mock.calls[0]?.[0]).toMatchObject({ id })
@@ -69,14 +76,14 @@ describe('useOfflineQueue', () => {
 
   it('no envía user_id en el payload: lo deja al valor por defecto de la columna (auth.uid())', async () => {
     const { saveRoute } = useOfflineQueue()
-    await saveRoute({ ...inputBase }, null)
+    await saveRoute({ ...inputBase }, MANTENER)
 
     expect(mockUpsert.mock.calls[0]?.[0]).not.toHaveProperty('user_id')
   })
 
   it('usa onConflict: "id" para que el upsert sea idempotente por id', async () => {
     const { saveRoute } = useOfflineQueue()
-    await saveRoute({ ...inputBase }, null)
+    await saveRoute({ ...inputBase }, MANTENER)
 
     expect(mockUpsert.mock.calls[0]?.[1]).toMatchObject({ onConflict: 'id' })
   })
@@ -93,7 +100,7 @@ describe('useOfflineQueue', () => {
     })
 
     const { saveRoute } = useOfflineQueue()
-    await saveRoute({ ...inputBase }, new Blob(['foto'], { type: 'image/jpeg' }))
+    await saveRoute({ ...inputBase }, reemplazar(new Blob(['foto'], { type: 'image/jpeg' })))
 
     expect(orden).toEqual(['foto', 'fila'])
   })
@@ -104,7 +111,7 @@ describe('useOfflineQueue', () => {
       .mockResolvedValueOnce({ data: null, error: null })
 
     const { saveRoute, retry } = useOfflineQueue()
-    const id = await saveRoute({ ...inputBase }, null)
+    const id = await saveRoute({ ...inputBase }, MANTENER)
 
     let items = await getColaItems()
     expect(items).toHaveLength(1)
@@ -126,7 +133,7 @@ describe('useOfflineQueue', () => {
       .mockResolvedValueOnce({ data: null, error: null })
 
     const { saveRoute, retry } = useOfflineQueue()
-    const id = await saveRoute({ ...inputBase }, new Blob(['foto'], { type: 'image/jpeg' }))
+    const id = await saveRoute({ ...inputBase }, reemplazar(new Blob(['foto'], { type: 'image/jpeg' })))
 
     expect((await getColaItems())[0]?.estado).toBe('error')
 
@@ -139,37 +146,75 @@ describe('useOfflineQueue', () => {
     expect(await getColaItems()).toHaveLength(0)
   })
 
-  it('si Supabase lanza una excepción de red (no solo {error}), el item se marca "error" sin romper la sincronización', async () => {
+  it('si Supabase lanza una excepción de red (no solo {error}), el item se marca "error" y se puede reintentar en el siguiente syncAll()', async () => {
     mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
-    const { saveRoute } = useOfflineQueue()
-    const id = await saveRoute({ ...inputBase }, null)
+    const { saveRoute, syncAll } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, MANTENER)
 
-    const items = await getColaItems()
+    let items = await getColaItems()
     expect(items).toHaveLength(1)
     expect(items[0]?.id).toBe(id)
     expect(items[0]?.estado).toBe('error')
+    expect(items[0]?.bloqueado).toBe(false)
+
+    mockUpsert.mockResolvedValueOnce({ data: null, error: null })
+    await syncAll()
+
+    items = await getColaItems()
+    expect(items).toHaveLength(0)
   })
 
-  it('sin sesión (caducada sin red), la ruta queda "pendiente de login" sin borrarse ni marcar error', async () => {
+  it('un error de permisos/política se marca "error" visible pero NO se reintenta en bucle automático', async () => {
+    mockUpsert.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'permission denied for table rutas', code: '42501' },
+    })
+
+    const { saveRoute, syncAll } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, MANTENER)
+
+    let items = await getColaItems()
+    expect(items).toHaveLength(1)
+    expect(items[0]?.estado).toBe('error')
+    expect(items[0]?.bloqueado).toBe(true)
+    expect(items[0]?.errorMensaje).toMatch(/No se pudo guardar la ruta/)
+
+    // Aunque se dispare syncAll() varias veces (p. ej. al volver a abrir la
+    // app o recuperar la red), un item bloqueado no se reintenta solo.
+    await syncAll()
+    await syncAll()
+    expect(mockUpsert).toHaveBeenCalledTimes(1)
+
+    items = await getColaItems()
+    expect(items).toHaveLength(1)
+
+    // Solo un reintento MANUAL lo vuelve a intentar.
+    const { retry } = useOfflineQueue()
+    mockUpsert.mockResolvedValueOnce({ data: null, error: null })
+    await retry(id)
+
+    expect(mockUpsert).toHaveBeenCalledTimes(2)
+    expect(await getColaItems()).toHaveLength(0)
+  })
+
+  it('sin sesión (caducada sin red), saveRoute queda "pendiente de login" sin borrarse ni marcar error', async () => {
     mockGetSession.mockResolvedValue(SIN_SESION)
 
-    const { saveRoute } = useOfflineQueue()
-    const id = await saveRoute({ ...inputBase }, null)
+    const { saveRoute, syncAll } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, MANTENER)
 
-    const items = await getColaItems()
+    let items = await getColaItems()
     expect(items).toHaveLength(1)
     expect(items[0]?.estado).toBe('pendiente_login')
     expect(items[0]?.errorMensaje).toBeNull()
     expect(mockUpsert).not.toHaveBeenCalled()
 
-    // Vuelve a iniciar sesión: la próxima sincronización debe completarse.
     mockGetSession.mockResolvedValue(SESION_VALIDA)
-
-    const { syncAll } = useOfflineQueue()
     await syncAll()
 
-    expect(await getColaItems()).toHaveLength(0)
+    items = await getColaItems()
+    expect(items).toHaveLength(0)
     expect(mockUpsert).toHaveBeenCalledTimes(1)
     expect(id).toBeTruthy()
   })
@@ -178,11 +223,66 @@ describe('useOfflineQueue', () => {
     const { saveRoute } = useOfflineQueue()
 
     await expect(
-      saveRoute({ ...inputBase, dificultad: 'facil' as unknown as Dificultad }, null),
+      saveRoute({ ...inputBase, dificultad: 'facil' as unknown as Dificultad }, MANTENER),
     ).rejects.toThrow(/Dificultad no válida/)
 
     expect(await getColaItems()).toHaveLength(0)
     expect(mockUpsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('clasificación de errores (permisos vs. cuota)', () => {
+  it('reconoce errores de permisos/política por status, code o mensaje', () => {
+    expect(_erroresParaTests.esErrorDePermisos({ status: 403 })).toBe(true)
+    expect(_erroresParaTests.esErrorDePermisos({ status: 401 })).toBe(true)
+    expect(_erroresParaTests.esErrorDePermisos({ code: '42501' })).toBe(true)
+    expect(_erroresParaTests.esErrorDePermisos({ message: 'permission denied for table rutas' })).toBe(
+      true,
+    )
+    expect(_erroresParaTests.esErrorDePermisos({ message: 'Failed to fetch' })).toBe(false)
+    expect(_erroresParaTests.esErrorDePermisos(undefined)).toBe(false)
+  })
+
+  it('reconoce un DOMException QuotaExceededError como error de cuota de IndexedDB', () => {
+    expect(_erroresParaTests.esErrorDeCuota(new DOMException('cuota agotada', 'QuotaExceededError'))).toBe(
+      true,
+    )
+    expect(_erroresParaTests.esErrorDeCuota(new Error('otra cosa'))).toBe(false)
+    expect(_erroresParaTests.esErrorDeCuota(new DOMException('otro', 'NotFoundError'))).toBe(false)
+  })
+})
+
+describe('useOfflineQueue: foto al editar (mantener / reemplazar / quitar)', () => {
+  it('"mantener" conserva el foto_path existente sin tocar Storage', async () => {
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase, id: 'ruta-1' }, MANTENER, 'user-1/ruta-1.jpg')
+
+    expect(mockUpload).not.toHaveBeenCalled()
+    expect(mockRemove).not.toHaveBeenCalled()
+    expect(mockUpsert.mock.calls[0]?.[0]).toMatchObject({ foto_path: 'user-1/ruta-1.jpg' })
+  })
+
+  it('"reemplazar" sube la nueva foto al mismo path (sobrescribe) y la usa en la fila', async () => {
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute(
+      { ...inputBase, id: 'ruta-1' },
+      reemplazar(new Blob(['nueva'], { type: 'image/jpeg' })),
+      'user-1/ruta-1.jpg',
+    )
+
+    expect(mockUpload).toHaveBeenCalledTimes(1)
+    expect(mockUpload.mock.calls[0]?.[0]).toBe('user-1/ruta-1.jpg')
+    expect(mockRemove).not.toHaveBeenCalled()
+    expect(mockUpsert.mock.calls[0]?.[0]).toMatchObject({ foto_path: 'user-1/ruta-1.jpg' })
+  })
+
+  it('"quitar" borra el archivo de Storage y deja foto_path en null', async () => {
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase, id: 'ruta-1' }, QUITAR, 'user-1/ruta-1.jpg')
+
+    expect(mockRemove).toHaveBeenCalledWith(['user-1/ruta-1.jpg'])
+    expect(mockUpload).not.toHaveBeenCalled()
+    expect(mockUpsert.mock.calls[0]?.[0]).toMatchObject({ foto_path: null })
   })
 })
 
@@ -243,5 +343,12 @@ describe('useOfflineQueue: deleteRoute (borrado por la cola, igual que el guarda
     expect(items[0]?.estado).toBe('pendiente_login')
     expect(mockDeleteEq).not.toHaveBeenCalled()
     expect(mockRemove).not.toHaveBeenCalled()
+  })
+
+  it('borrar una ruta con foto también borra la foto de Storage', async () => {
+    const { deleteRoute } = useOfflineQueue()
+    await deleteRoute('ruta-1', 'user-1/ruta-1.jpg')
+
+    expect(mockRemove).toHaveBeenCalledWith(['user-1/ruta-1.jpg'])
   })
 })
