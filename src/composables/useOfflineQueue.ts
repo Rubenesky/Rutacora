@@ -66,8 +66,16 @@ async function syncOne(item: ColaItem): Promise<void> {
   sincronizando.add(item.id)
 
   try {
-    const { data: sessionData } = await supabase.auth.getSession()
-    const userId = sessionData.session?.user.id
+    // getSession() no debería lanzar, pero si falla el refresco del token
+    // sin red, lo tratamos igual que "sin sesión" en vez de romper el resto
+    // de la sincronización.
+    let userId: string | undefined
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      userId = sessionData.session?.user.id
+    } catch {
+      userId = undefined
+    }
 
     // Sin sesión usable (sin login, o caducada sin red para poder
     // refrescarla): no se borra nada ni se marca como error definitivo.
@@ -83,28 +91,34 @@ async function syncOne(item: ColaItem): Promise<void> {
     // después la fila. Si falla a mitad (foto subida, fila no), el
     // reintento vuelve a subir la misma foto (no duplica) y reintenta
     // la fila con el mismo id (upsert, tampoco duplica).
-    if (item.foto && fotoPath) {
-      const { error: errorSubida } = await supabase.storage
-        .from(FOTOS_BUCKET)
-        .upload(fotoPath, item.foto, { upsert: true, contentType: 'image/jpeg' })
+    //
+    // No se envía "user_id": se deja al valor por defecto de la columna
+    // (auth.uid()), que la propia base de datos rellena a partir del
+    // usuario autenticado de la petición. Así nunca depende de un cálculo
+    // hecho en el cliente.
+    try {
+      if (item.foto && fotoPath) {
+        const { error: errorSubida } = await supabase.storage
+          .from(FOTOS_BUCKET)
+          .upload(fotoPath, item.foto, { upsert: true, contentType: 'image/jpeg' })
 
-      if (errorSubida) {
-        await actualizarEstado(item.id, 'error', 'No se pudo subir la foto. Se reintentará.', true)
-        return
+        if (errorSubida) throw new Error('No se pudo subir la foto.')
       }
+
+      const { error: errorFila } = await supabase
+        .from('rutas')
+        .upsert({ ...item.ruta, id: item.id, foto_path: fotoPath }, { onConflict: 'id' })
+
+      if (errorFila) throw new Error('No se pudo guardar la ruta.')
+
+      await deleteColaItem(item.id)
+      await refrescarPendientes()
+    } catch (err) {
+      // Cubre tanto los errores que Supabase devuelve como { error } como
+      // los que lanza como excepción (p. ej. "Failed to fetch" sin red).
+      const mensaje = err instanceof Error ? err.message : 'Error de red al sincronizar.'
+      await actualizarEstado(item.id, 'error', `${mensaje} Se reintentará.`, true)
     }
-
-    const { error: errorFila } = await supabase
-      .from('rutas')
-      .upsert({ ...item.ruta, id: item.id, user_id: userId, foto_path: fotoPath }, { onConflict: 'id' })
-
-    if (errorFila) {
-      await actualizarEstado(item.id, 'error', 'No se pudo guardar la ruta. Se reintentará.', true)
-      return
-    }
-
-    await deleteColaItem(item.id)
-    await refrescarPendientes()
   } finally {
     sincronizando.delete(item.id)
   }

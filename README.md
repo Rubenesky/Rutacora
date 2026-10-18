@@ -52,8 +52,37 @@ npx supabase gen types typescript --project-id TU_PROJECT_ID > src/types/databas
 
 La capa "IGN (Mapa Topográfico Nacional)" usa una URL de teselas WMTS construida a partir de parámetros oficiales confirmados en el `GetCapabilities` del IGN (capa `MTN`, `tilematrixset=GoogleMapsCompatible`, formato `image/jpeg`), pero el IGN no publica una plantilla "lista para usar" en Leaflet. Al probar la app en local, comprueba visualmente que esa capa carga teselas correctamente; si no es así, dímelo.
 
+## Cola offline y `saveRoute()`
+
+`saveRoute()` (en `src/composables/useOfflineQueue.ts`) es el único punto de entrada para guardar una ruta: escribe primero en IndexedDB y después intenta sincronizar con Supabase (foto primero, luego la fila, con upsert idempotente por id). El formulario y las fotos (bloque 4) deben llamar siempre a esta función, nunca a Supabase directamente.
+
+### `window.__rutacora` (TEMPORAL, solo desarrollo)
+
+Mientras no existe el formulario, `src/devtools.ts` expone `saveRoute`, `pendientes`, `syncAll` y `retry` en `window.__rutacora`, **solo si `import.meta.env.DEV` es `true`** (no existe en el build de producción). Sirve para probar la cola desde la consola del navegador:
+
+```js
+await window.__rutacora.saveRoute(
+  {
+    nombre: 'Prueba cerca de Granada',
+    lat: 37.17,
+    lon: -3.6,
+    distancia_km: 8.5,
+    desnivel_m: 350,
+    duracion_min: 150,
+    tipo: 'circular',
+    fecha: '2026-10-18',
+    dificultad: 'media',
+    notas: 'Ruta de prueba.',
+  },
+  null,
+)
+
+window.__rutacora.pendientes.value // estado actual de la cola
+```
+
+**Esto es temporal:** `src/devtools.ts` y su conexión en `src/main.ts` se retiran al cerrar el bloque del formulario (bloque 4), cuando ya haya una UI real para guardar rutas.
+
 ## Pendiente de documentar (bloques siguientes)
 
-- Cola offline (IndexedDB) y función `saveRoute()`.
 - Configuración de variables en Netlify y despliegue.
 - Verificación del keep-alive (Netlify Scheduled Function contra `public.keepalive`).

@@ -56,8 +56,22 @@ describe('useOfflineQueue', () => {
     const id = await saveRoute({ ...inputBase }, null)
 
     expect(mockUpsert).toHaveBeenCalledTimes(1)
-    expect(mockUpsert.mock.calls[0]?.[0]).toMatchObject({ id, user_id: 'user-1' })
+    expect(mockUpsert.mock.calls[0]?.[0]).toMatchObject({ id })
     expect(await getColaItems()).toHaveLength(0)
+  })
+
+  it('no envía user_id en el payload: lo deja al valor por defecto de la columna (auth.uid())', async () => {
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase }, null)
+
+    expect(mockUpsert.mock.calls[0]?.[0]).not.toHaveProperty('user_id')
+  })
+
+  it('usa onConflict: "id" para que el upsert sea idempotente por id', async () => {
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase }, null)
+
+    expect(mockUpsert.mock.calls[0]?.[1]).toMatchObject({ onConflict: 'id' })
   })
 
   it('sube la foto antes de insertar la fila (orden de sincronización)', async () => {
@@ -116,6 +130,18 @@ describe('useOfflineQueue', () => {
     expect(mockUpload).toHaveBeenCalledTimes(2)
     expect(mockUpsert).toHaveBeenCalledTimes(2)
     expect(await getColaItems()).toHaveLength(0)
+  })
+
+  it('si Supabase lanza una excepción de red (no solo {error}), el item se marca "error" sin romper la sincronización', async () => {
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { saveRoute } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, null)
+
+    const items = await getColaItems()
+    expect(items).toHaveLength(1)
+    expect(items[0]?.id).toBe(id)
+    expect(items[0]?.estado).toBe('error')
   })
 
   it('sin sesión (caducada sin red), la ruta queda "pendiente de login" sin borrarse ni marcar error', async () => {
