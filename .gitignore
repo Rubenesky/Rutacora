@@ -1,0 +1,22 @@
+# dependencias
+node_modules/
+
+# build
+dist/
+dev-dist/
+*.local
+.vite/
+
+# variables de entorno (NUNCA subir claves)
+.env
+.env.local
+.env.*.local
+
+# editor / OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# vue-tsc build info
+*.tsbuildinfo

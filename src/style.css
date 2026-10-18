@@ -1,0 +1,49 @@
+:root {
+  --color-bg: #f4f1ea;
+  --color-surface: #ffffff;
+  --color-text: #1b2a1f;
+  --color-text-muted: #4b5a4e;
+  --color-primary: #2e7d32;
+  --color-primary-dark: #1b5e20;
+  --color-border: #c8cdc5;
+  --color-danger: #b3261e;
+  --radius: 12px;
+  --tap-min: 48px;
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 16px;
+}
+
+button {
+  min-height: var(--tap-min);
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+}
