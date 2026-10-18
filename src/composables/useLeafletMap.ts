@@ -78,7 +78,10 @@ export function useLeafletMap(container: HTMLElement) {
   const baseLayers = createBaseLayers()
   const primeraCapa = Object.values(baseLayers)[0]
   if (primeraCapa) primeraCapa.addTo(map)
-  L.control.layers(baseLayers).addTo(map)
+  // "bottomleft": el zoom ocupa arriba-izquierda, la atribución abajo-derecha
+  // y el botón "Salir" de la app arriba-derecha. Así ningún control se solapa
+  // con otro en ningún tamaño de pantalla.
+  L.control.layers(baseLayers, undefined, { position: 'bottomleft' }).addTo(map)
 
   const clusterGroup = L.markerClusterGroup()
   map.addLayer(clusterGroup)

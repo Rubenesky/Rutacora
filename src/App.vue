@@ -51,6 +51,7 @@ const { session, isReady, logout } = useAuth()
   z-index: 1000;
   top: var(--space-2);
   right: var(--space-2);
+  min-width: 44px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-text);

@@ -48,6 +48,21 @@ button {
   cursor: pointer;
 }
 
+/* Controles de Leaflet: refuerza el área táctil mínima a 44px
+   (el valor por defecto de Leaflet es menor) para que sean usables
+   con una mano en móvil. */
+.leaflet-control-zoom a,
+.leaflet-control-layers-toggle {
+  width: 44px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+}
+
+.leaflet-control-layers label {
+  display: block;
+  padding: 6px 2px;
+}
+
 /* Contenido del popup de Leaflet: se inyecta como HTML plano (sin
    vue-leaflet), así que necesita estilos globales, no "scoped". */
 .leaflet-popup-content {
