@@ -2,6 +2,7 @@
 import { useAuth } from '@/composables/useAuth'
 import LoginView from '@/components/LoginView.vue'
 import MapView from '@/components/MapView.vue'
+import PendingSyncBadge from '@/components/PendingSyncBadge.vue'
 
 const { session, isReady, logout } = useAuth()
 </script>
@@ -18,14 +19,17 @@ const { session, isReady, logout } = useAuth()
     v-else
     class="app-authenticated"
   >
-    <button
-      type="button"
-      class="logout-button"
-      @click="logout"
-    >
-      Salir
-    </button>
-    <MapView />
+    <PendingSyncBadge />
+    <div class="map-wrapper">
+      <button
+        type="button"
+        class="logout-button"
+        @click="logout"
+      >
+        Salir
+      </button>
+      <MapView />
+    </div>
   </div>
 </template>
 
@@ -42,8 +46,15 @@ const { session, isReady, logout } = useAuth()
 }
 
 .app-authenticated {
-  position: relative;
   height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 .logout-button {

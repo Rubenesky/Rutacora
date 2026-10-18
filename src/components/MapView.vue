@@ -50,7 +50,7 @@ onUnmounted(() => {
 .map-view {
   position: relative;
   width: 100%;
-  height: 100svh;
+  height: 100%;
 }
 
 .map-container {
