@@ -124,6 +124,28 @@ button {
   color: var(--color-text);
 }
 
+.ruta-popup-pendiente {
+  display: inline-block;
+  margin: 0 0 var(--space-1);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: #fff3cd;
+  color: #7a5b00;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Marcador distinguible para rutas pendientes de sincronizar. */
+.marcador-pendiente-punto {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
 .ruta-popup-acciones button[data-action='borrar'] {
   color: var(--color-danger);
   border-color: var(--color-danger);

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useLeafletMap } from '@/composables/useLeafletMap'
-import { useRoutes } from '@/composables/useRoutes'
+import { useVisibleRoutes, type RutaConEstado } from '@/composables/useVisibleRoutes'
 import { useOfflineQueue, type AccionFoto, type GuardarRutaInput } from '@/composables/useOfflineQueue'
 import RouteFormModal from './RouteFormModal.vue'
+import RouteListPanel from './RouteListPanel.vue'
 import type { Ruta } from '@/types/database.types'
 
 const mapContainer = ref<HTMLElement | null>(null)
-const { rutas, isLoading, errorMessage, fetchRutas } = useRoutes()
+const { rutasVisibles, isLoading, errorMessage, fetchRutas } = useVisibleRoutes()
 const { saveRoute, deleteRoute } = useOfflineQueue()
 
 let leafletMap: ReturnType<typeof useLeafletMap> | null = null
@@ -21,11 +22,13 @@ const seleccionLon = ref<number | null>(null)
 // Mientras sea false, una foto con GPS en el EXIF puede autorrellenarla.
 const ubicacionElegida = ref(false)
 
-function onEditarRuta(ruta: Ruta): void {
+const panelRutasAbierto = ref(false)
+
+function onEditarRuta(ruta: RutaConEstado): void {
   abrirFormulario(ruta)
 }
 
-function onBorrarRuta(ruta: Ruta): void {
+function onBorrarRuta(ruta: RutaConEstado): void {
   const confirmado = window.confirm(`¿Borrar "${ruta.nombre}"? Esta acción no se puede deshacer.`)
   if (!confirmado) return
   void borrarRuta(ruta)
@@ -38,7 +41,7 @@ onMounted(async () => {
   await fetchRutas()
 })
 
-watch(rutas, (nuevasRutas) => {
+watch(rutasVisibles, (nuevasRutas) => {
   leafletMap?.renderRutas(nuevasRutas)
 })
 
@@ -69,49 +72,28 @@ function cerrarFormulario(): void {
   leafletMap?.finalizarSeleccionUbicacion()
 }
 
-function aRutaCompleta(payload: GuardarRutaInput, id: string, fotoPath: string | null): Ruta {
-  return {
-    id,
-    user_id: '',
-    nombre: payload.nombre,
-    lat: payload.lat,
-    lon: payload.lon,
-    distancia_km: payload.distancia_km,
-    desnivel_m: payload.desnivel_m,
-    duracion_min: payload.duracion_min,
-    tipo: payload.tipo,
-    fecha: payload.fecha,
-    dificultad: payload.dificultad,
-    notas: payload.notas,
-    foto_path: fotoPath,
-    created_at: new Date().toISOString(),
-  }
-}
-
 async function onGuardarFormulario(payload: GuardarRutaInput, accionFoto: AccionFoto): Promise<void> {
   const id = payload.id ?? crypto.randomUUID()
   const fotoPathExistente = formInicial.value?.foto_path ?? null
-  const fotoPathOptimista = accionFoto.tipo === 'quitar' ? null : fotoPathExistente
-
-  // Actualización optimista: el marcador aparece/se actualiza al instante,
-  // haya red o no. Con red, fetchRutas() la confirma enseguida con los
-  // datos reales; sin red, se queda así hasta que la cola sincronice.
-  const optimista = aRutaCompleta(payload, id, fotoPathOptimista)
-  const yaExiste = rutas.value.some((r) => r.id === id)
-  rutas.value = yaExiste
-    ? rutas.value.map((r) => (r.id === id ? optimista : r))
-    : [optimista, ...rutas.value]
 
   cerrarFormulario()
 
+  // La lista visible (rutasVisibles) ya refleja este guardado al instante
+  // a través de la cola offline (useVisibleRoutes fusiona "pendientes" con
+  // la última lista descargada/cacheada), haya red o no.
   await saveRoute({ ...payload, id }, accionFoto, fotoPathExistente)
   await fetchRutas()
 }
 
-async function borrarRuta(ruta: Ruta): Promise<void> {
-  rutas.value = rutas.value.filter((r) => r.id !== ruta.id)
+async function borrarRuta(ruta: RutaConEstado): Promise<void> {
   await deleteRoute(ruta.id, ruta.foto_path)
   await fetchRutas()
+}
+
+function onSeleccionarRutaDeLista(ruta: RutaConEstado): void {
+  const esEscritorio = window.matchMedia('(min-width: 768px)').matches
+  if (!esEscritorio) panelRutasAbierto.value = false
+  leafletMap?.centrarYAbrirRuta(ruta.id)
 }
 
 onUnmounted(() => {
@@ -148,6 +130,13 @@ onUnmounted(() => {
       >
         + Añadir ruta
       </button>
+      <button
+        type="button"
+        class="boton-rutas"
+        @click="panelRutasAbierto = true"
+      >
+        Rutas
+      </button>
     </div>
   </div>
 
@@ -160,6 +149,13 @@ onUnmounted(() => {
     @cerrar="cerrarFormulario"
     @guardar="onGuardarFormulario"
     @ubicacion-elegida-por-usuario="ubicacionElegida = true"
+  />
+
+  <RouteListPanel
+    :abierto="panelRutasAbierto"
+    :rutas="rutasVisibles"
+    @cerrar="panelRutasAbierto = false"
+    @seleccionar="onSeleccionarRutaDeLista"
   />
 </template>
 
@@ -179,15 +175,26 @@ onUnmounted(() => {
 }
 
 .map-actions {
+  display: flex;
+  gap: var(--space-2);
   padding: var(--space-2);
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
 }
 
 .boton-anadir {
-  width: 100%;
+  flex: 2;
   background: var(--color-primary);
   color: #fff;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.boton-rutas {
+  flex: 1;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
   font-weight: 600;
   font-size: 16px;
 }

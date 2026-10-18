@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb'
-import type { RutaInsert } from '@/types/database.types'
+import type { Ruta, RutaInsert } from '@/types/database.types'
 
 export type EstadoCola = 'pendiente' | 'pendiente_login' | 'error'
 export type TipoOperacion = 'guardar' | 'borrar'
@@ -29,8 +29,10 @@ export interface ColaItem {
 }
 
 const DB_NAME = 'rutacora-offline'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE = 'cola'
+const STORE_CACHE_RUTAS = 'rutasCache'
+const CLAVE_CACHE_RUTAS = 'ultima'
 
 let dbPromise: Promise<IDBPDatabase> | null = null
 
@@ -41,10 +43,27 @@ function getDb(): Promise<IDBPDatabase> {
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: 'id' })
         }
+        if (!db.objectStoreNames.contains(STORE_CACHE_RUTAS)) {
+          db.createObjectStore(STORE_CACHE_RUTAS)
+        }
       },
     })
   }
   return dbPromise
+}
+
+/** Guarda la última lista de rutas descargada con éxito (NO es el precaché
+ * del service worker: es solo IndexedDB, para poder mostrarla si la
+ * siguiente descarga falla por falta de red). */
+export async function guardarRutasCache(rutas: Ruta[]): Promise<void> {
+  const db = await getDb()
+  await db.put(STORE_CACHE_RUTAS, rutas, CLAVE_CACHE_RUTAS)
+}
+
+export async function leerRutasCache(): Promise<Ruta[] | null> {
+  const db = await getDb()
+  const valor = await db.get(STORE_CACHE_RUTAS, CLAVE_CACHE_RUTAS)
+  return valor ?? null
 }
 
 export async function putColaItem(item: ColaItem): Promise<void> {
@@ -66,4 +85,10 @@ export async function deleteColaItem(id: string): Promise<void> {
 export async function clearCola(): Promise<void> {
   const db = await getDb()
   await db.clear(STORE)
+}
+
+/** Solo para tests: vacía la caché de la última lista de rutas. */
+export async function clearRutasCache(): Promise<void> {
+  const db = await getDb()
+  await db.clear(STORE_CACHE_RUTAS)
 }

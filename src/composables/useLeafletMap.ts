@@ -9,7 +9,7 @@ import { escapeHtml } from '@/lib/escapeHtml'
 import { guardarCapaElegida, leerCapaGuardada } from '@/lib/preferenciaCapaMapa'
 import { guardarUrlCacheada, obtenerUrlCacheada } from '@/lib/signedUrlCache'
 import { supabase } from '@/lib/supabaseClient'
-import type { Ruta } from '@/types/database.types'
+import type { RutaConEstado } from './useVisibleRoutes'
 
 // Vista inicial centrada en la península, con Baleares y Canarias accesibles
 // mediante zoom/paneo (no entran todas a la vez en una vista razonable).
@@ -17,9 +17,18 @@ const CENTRO_ESPANA: L.LatLngTuple = [40.0, -3.7]
 const ZOOM_INICIAL = 6
 
 export interface OpcionesLeafletMap {
-  onEditarRuta?: (ruta: Ruta) => void
-  onBorrarRuta?: (ruta: Ruta) => void
+  onEditarRuta?: (ruta: RutaConEstado) => void
+  onBorrarRuta?: (ruta: RutaConEstado) => void
 }
+
+// Marcador distinguible para rutas que aún están pendientes de sincronizar
+// (naranja, en vez del azul por defecto de Leaflet).
+const iconoPendiente = L.divIcon({
+  className: 'marcador-pendiente',
+  html: '<span class="marcador-pendiente-punto"></span>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+})
 
 function formatearFecha(fecha: string): string {
   const [anio, mes, dia] = fecha.split('-')
@@ -27,7 +36,7 @@ function formatearFecha(fecha: string): string {
   return `${dia}/${mes}/${anio}`
 }
 
-function popupHtml(ruta: Ruta): string {
+function popupHtml(ruta: RutaConEstado): string {
   const tipo = ruta.tipo === 'circular' ? 'Circular' : ruta.tipo === 'lineal' ? 'Lineal' : '—'
   const desnivel = ruta.desnivel_m != null ? `${ruta.desnivel_m} m` : '—'
   const duracion = ruta.duracion_min != null ? `${ruta.duracion_min} min` : '—'
@@ -43,6 +52,7 @@ function popupHtml(ruta: Ruta): string {
         <dt>Fecha</dt><dd>${formatearFecha(ruta.fecha)}</dd>
         <dt>Dificultad</dt><dd>${escapeHtml(ruta.dificultad)}</dd>
       </dl>
+      ${ruta.pendienteSync ? '<p class="ruta-popup-pendiente">Pendiente de sincronizar</p>' : ''}
       ${ruta.notas ? `<p class="ruta-popup-notas">${escapeHtml(ruta.notas)}</p>` : ''}
       <div class="ruta-popup-foto" data-foto-path="${ruta.foto_path ? escapeHtml(ruta.foto_path) : ''}">
         ${ruta.foto_path ? 'Cargando foto…' : ''}
@@ -113,10 +123,13 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
   const clusterGroup = L.markerClusterGroup()
   map.addLayer(clusterGroup)
 
-  function renderRutas(rutas: Ruta[]): void {
+  const marcadoresPorId = new Map<string, L.Marker>()
+
+  function renderRutas(rutas: RutaConEstado[]): void {
     clusterGroup.clearLayers()
+    marcadoresPorId.clear()
     for (const ruta of rutas) {
-      const marker = L.marker([ruta.lat, ruta.lon])
+      const marker = L.marker([ruta.lat, ruta.lon], ruta.pendienteSync ? { icon: iconoPendiente } : undefined)
       marker.bindPopup(popupHtml(ruta))
       // Listener por marcador (no global): así cada popup tiene acceso por
       // closure a su propia "ruta" para las acciones de editar/borrar.
@@ -134,7 +147,17 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
           ?.addEventListener('click', () => opciones.onBorrarRuta?.(ruta))
       })
       clusterGroup.addLayer(marker)
+      marcadoresPorId.set(ruta.id, marker)
     }
+  }
+
+  /** Centra el mapa en esa ruta y abre su popup (usado desde el panel de
+   * lista). zoomToShowLayer se encarga de "desagrupar" el cluster si el
+   * marcador está dentro de uno colapsado. */
+  function centrarYAbrirRuta(id: string): void {
+    const marker = marcadoresPorId.get(id)
+    if (!marker) return
+    clusterGroup.zoomToShowLayer(marker, () => marker.openPopup())
   }
 
   // --- Selección de ubicación (para el formulario de añadir/editar ruta) ---
@@ -187,5 +210,6 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     iniciarSeleccionUbicacion,
     moverSeleccion,
     finalizarSeleccionUbicacion,
+    centrarYAbrirRuta,
   }
 }
