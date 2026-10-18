@@ -47,3 +47,49 @@ button {
   border: none;
   cursor: pointer;
 }
+
+/* Contenido del popup de Leaflet: se inyecta como HTML plano (sin
+   vue-leaflet), así que necesita estilos globales, no "scoped". */
+.leaflet-popup-content {
+  margin: var(--space-2);
+  min-width: 220px;
+}
+
+.ruta-popup h3 {
+  margin: 0 0 var(--space-1);
+  font-size: 18px;
+}
+
+.ruta-popup dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-1);
+  margin: 0 0 var(--space-1);
+  font-size: 14px;
+}
+
+.ruta-popup dt {
+  color: var(--color-text-muted);
+}
+
+.ruta-popup dd {
+  margin: 0;
+}
+
+.ruta-popup-notas {
+  margin: var(--space-1) 0;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.ruta-popup-foto {
+  margin-top: var(--space-1);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.ruta-popup-foto img {
+  max-width: 100%;
+  border-radius: var(--radius);
+  display: block;
+}

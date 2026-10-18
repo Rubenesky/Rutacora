@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAuth } from '@/composables/useAuth'
 import LoginView from '@/components/LoginView.vue'
-import { APP_NAME } from '@/config'
+import MapView from '@/components/MapView.vue'
 
 const { session, isReady, logout } = useAuth()
 </script>
@@ -14,19 +14,19 @@ const { session, isReady, logout } = useAuth()
     <p>Cargando…</p>
   </main>
   <LoginView v-else-if="!session" />
-  <main
+  <div
     v-else
-    class="app-shell"
+    class="app-authenticated"
   >
-    <h1>{{ APP_NAME }}</h1>
-    <p>Sesión iniciada. El mapa llega en el siguiente bloque.</p>
     <button
       type="button"
+      class="logout-button"
       @click="logout"
     >
-      Cerrar sesión
+      Salir
     </button>
-  </main>
+    <MapView />
+  </div>
 </template>
 
 <style scoped>
@@ -41,10 +41,21 @@ const { session, isReady, logout } = useAuth()
   text-align: center;
 }
 
-.app-shell button {
-  background: var(--color-primary);
-  color: #fff;
+.app-authenticated {
+  position: relative;
+  height: 100svh;
+}
+
+.logout-button {
+  position: absolute;
+  z-index: 1000;
+  top: var(--space-2);
+  right: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
   font-weight: 600;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 </style>

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { normalizeSupabaseUrl } from './supabaseUrl'
+import type { Database } from '@/types/database.types'
 
 const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -12,7 +13,7 @@ if (!rawSupabaseUrl || !supabaseAnonKey) {
 
 const supabaseUrl = normalizeSupabaseUrl(rawSupabaseUrl)
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
