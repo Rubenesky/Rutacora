@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { useAuth } from '@/composables/useAuth'
 import { useLeafletMap } from '@/composables/useLeafletMap'
 import { useVisibleRoutes, type RutaConEstado } from '@/composables/useVisibleRoutes'
 import { useOfflineQueue, type AccionFoto, type GuardarRutaInput } from '@/composables/useOfflineQueue'
+import { ANCHO_BREAKPOINT_ESCRITORIO_PX, ANCHO_PANEL_RUTAS_PX } from '@/lib/constantes'
+import LoginModal from './LoginModal.vue'
 import RouteFormModal from './RouteFormModal.vue'
 import RouteListPanel from './RouteListPanel.vue'
 import type { Ruta } from '@/types/database.types'
@@ -10,6 +13,7 @@ import type { Ruta } from '@/types/database.types'
 const mapContainer = ref<HTMLElement | null>(null)
 const { rutasVisibles, isLoading, errorMessage, fetchRutas } = useVisibleRoutes()
 const { saveRoute, deleteRoute } = useOfflineQueue()
+const { session, logout } = useAuth()
 
 let leafletMap: ReturnType<typeof useLeafletMap> | null = null
 
@@ -23,6 +27,7 @@ const seleccionLon = ref<number | null>(null)
 const ubicacionElegida = ref(false)
 
 const panelRutasAbierto = ref(false)
+const loginAbierto = ref(false)
 
 function onEditarRuta(ruta: RutaConEstado): void {
   abrirFormulario(ruta)
@@ -36,13 +41,23 @@ function onBorrarRuta(ruta: RutaConEstado): void {
 
 onMounted(async () => {
   if (mapContainer.value) {
-    leafletMap = useLeafletMap(mapContainer.value, { onEditarRuta, onBorrarRuta })
+    leafletMap = useLeafletMap(mapContainer.value, {
+      onEditarRuta,
+      onBorrarRuta,
+      obtenerUserIdSesion: () => session.value?.user.id,
+    })
   }
   await fetchRutas()
 })
 
 watch(rutasVisibles, (nuevasRutas) => {
   leafletMap?.renderRutas(nuevasRutas)
+})
+
+// Si se cierra la sesión mientras el formulario está abierto (p. ej. en
+// otra pestaña), no tiene sentido dejarlo abierto: ya no se podría guardar.
+watch(session, (nuevaSesion) => {
+  if (!nuevaSesion && formAbierto.value) cerrarFormulario()
 })
 
 watch([seleccionLat, seleccionLon], ([lat, lon]) => {
@@ -90,10 +105,17 @@ async function borrarRuta(ruta: RutaConEstado): Promise<void> {
   await fetchRutas()
 }
 
+function esEscritorio(): boolean {
+  return window.matchMedia(`(min-width: ${ANCHO_BREAKPOINT_ESCRITORIO_PX}px)`).matches
+}
+
 function onSeleccionarRutaDeLista(ruta: RutaConEstado): void {
-  const esEscritorio = window.matchMedia('(min-width: 768px)').matches
-  if (!esEscritorio) panelRutasAbierto.value = false
-  leafletMap?.centrarYAbrirRuta(ruta.id)
+  if (esEscritorio()) {
+    leafletMap?.flyToRoute(ruta, panelRutasAbierto.value ? ANCHO_PANEL_RUTAS_PX : 0)
+  } else {
+    panelRutasAbierto.value = false
+    leafletMap?.flyToRoute(ruta, 0)
+  }
 }
 
 onUnmounted(() => {
@@ -117,25 +139,47 @@ onUnmounted(() => {
       Cargando rutas…
     </div>
 
+    <div class="top-actions">
+      <button
+        type="button"
+        class="boton-secundario"
+        @click="panelRutasAbierto = true"
+      >
+        Rutas
+      </button>
+      <button
+        v-if="session"
+        type="button"
+        class="boton-secundario"
+        @click="logout"
+      >
+        Salir
+      </button>
+      <button
+        v-else
+        type="button"
+        class="boton-secundario"
+        @click="loginAbierto = true"
+      >
+        Iniciar sesión
+      </button>
+    </div>
+
     <div
       ref="mapContainer"
       class="map-container"
     />
 
-    <div class="map-actions">
+    <div
+      v-if="session"
+      class="map-actions"
+    >
       <button
         type="button"
         class="boton-anadir"
         @click="abrirFormulario(null)"
       >
         + Añadir ruta
-      </button>
-      <button
-        type="button"
-        class="boton-rutas"
-        @click="panelRutasAbierto = true"
-      >
-        Rutas
       </button>
     </div>
   </div>
@@ -157,6 +201,11 @@ onUnmounted(() => {
     @cerrar="panelRutasAbierto = false"
     @seleccionar="onSeleccionarRutaDeLista"
   />
+
+  <LoginModal
+    v-if="loginAbierto"
+    @cerrar="loginAbierto = false"
+  />
 </template>
 
 <style scoped>
@@ -174,6 +223,25 @@ onUnmounted(() => {
   width: 100%;
 }
 
+.top-actions {
+  position: absolute;
+  z-index: 1000;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  gap: var(--space-1);
+}
+
+.boton-secundario {
+  min-width: 44px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-weight: 600;
+  padding: 0 var(--space-2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
 .map-actions {
   display: flex;
   gap: var(--space-2);
@@ -183,18 +251,9 @@ onUnmounted(() => {
 }
 
 .boton-anadir {
-  flex: 2;
+  width: 100%;
   background: var(--color-primary);
   color: #fff;
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.boton-rutas {
-  flex: 1;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
   font-weight: 600;
   font-size: 16px;
 }

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Session } from '@supabase/supabase-js'
 import { clearRutasCache } from '@/lib/offlineDb'
 
 const {
@@ -10,7 +11,12 @@ const {
   mockOrder,
   mockOnAuthStateChange,
 } = vi.hoisted(() => ({
-  mockGetSession: vi.fn(),
+  // Con valor por defecto: useAuth.ts llama a getSession() al cargar el
+  // módulo (antes de que beforeEach pueda configurar el mock).
+  mockGetSession: vi.fn(
+    (): Promise<{ data: { session: { user: { id: string } } | null }; error: null }> =>
+      Promise.resolve({ data: { session: null }, error: null }),
+  ),
   mockUpload: vi.fn(),
   mockUpsert: vi.fn(),
   mockDeleteEq: vi.fn(),
@@ -38,6 +44,7 @@ vi.mock('@/lib/supabaseClient', () => ({
 
 const { useVisibleRoutes } = await import('./useVisibleRoutes')
 const { useOfflineQueue, _resetParaTests } = await import('./useOfflineQueue')
+const { useAuth } = await import('./useAuth')
 
 const SESION_VALIDA = { data: { session: { user: { id: 'user-1' } } }, error: null }
 
@@ -86,6 +93,13 @@ beforeEach(async () => {
   mockDeleteEq.mockResolvedValue({ data: null, error: null })
   mockRemove.mockResolvedValue({ data: null, error: null })
   mockOrder.mockResolvedValue({ data: [rutaServidor], error: null })
+
+  // useAuth.init() solo llama a getSession() una vez, al cargar el módulo
+  // (con el valor por defecto de entonces); reconfigurar el mock después
+  // no lo vuelve a disparar. Para que session.value refleje lo que cada
+  // test necesita, se fija directamente aquí.
+  const { session } = useAuth()
+  session.value = SESION_VALIDA.data.session as unknown as Session
 })
 
 describe('useVisibleRoutes', () => {
@@ -97,8 +111,12 @@ describe('useVisibleRoutes', () => {
     expect(rutasVisibles.value[0]).toMatchObject({ id: 'ruta-servidor-1', pendienteSync: false })
   })
 
-  it('una ruta nueva encolada sin sincronizar aparece marcada como pendiente', async () => {
-    mockGetSession.mockResolvedValue({ data: { session: null }, error: null }) // evita que sincronice sola
+  it('una ruta nueva encolada sin sincronizar (propia, con sesión) aparece marcada como pendiente', async () => {
+    // Fuerza que la sincronización falle (p. ej. sin red) para que el item
+    // se quede en la cola y se pueda comprobar que aparece como pendiente.
+    // La sesión sigue siendo la válida (user-1): un pendiente solo se
+    // muestra si es de la cuenta con sesión activa.
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const { rutasVisibles, fetchRutas } = useVisibleRoutes()
     await fetchRutas()
@@ -112,17 +130,38 @@ describe('useVisibleRoutes', () => {
     expect(rutasVisibles.value).toHaveLength(2)
   })
 
-  it('una ruta con un borrado pendiente desaparece de la lista visible', async () => {
-    mockGetSession.mockResolvedValue({ data: { session: null }, error: null })
-
+  it('una ruta con un borrado pendiente (propio, con sesión) desaparece de la lista visible', async () => {
     const { rutasVisibles, fetchRutas } = useVisibleRoutes()
     await fetchRutas()
     expect(rutasVisibles.value).toHaveLength(1)
+
+    // Igual que arriba: se fuerza el fallo de red para que el borrado se
+    // quede pendiente en la cola (propio) en vez de completarse al momento.
+    mockDeleteEq.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const { deleteRoute } = useOfflineQueue()
     await deleteRoute('ruta-servidor-1', null)
 
     expect(rutasVisibles.value).toHaveLength(0)
+  })
+
+  it('sin sesión, un pendiente propio NO se muestra en la lista visible', async () => {
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { rutasVisibles, fetchRutas } = useVisibleRoutes()
+    await fetchRutas()
+
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase, id: 'ruta-nueva-1' }, { tipo: 'mantener' })
+    expect(rutasVisibles.value).toHaveLength(2)
+
+    // Se cierra la sesión: el pendiente sigue en la cola, pero deja de
+    // verse en el mapa/la lista hasta que vuelva a entrar.
+    const { session } = useAuth()
+    session.value = null
+
+    expect(rutasVisibles.value).toHaveLength(1)
+    expect(rutasVisibles.value.find((r) => r.id === 'ruta-nueva-1')).toBeUndefined()
   })
 
   it('usa la caché de IndexedDB cuando la descarga falla por falta de red', async () => {

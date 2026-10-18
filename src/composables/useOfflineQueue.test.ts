@@ -198,6 +198,37 @@ describe('useOfflineQueue', () => {
     expect(await getColaItems()).toHaveLength(0)
   })
 
+  it('la cola NO sincroniza con la sesión de otra cuenta: queda "pendiente_login_otra_cuenta", sin tocarse ni perderse', async () => {
+    // El primer intento (con user-1, el propietario) falla por red y se
+    // queda en la cola.
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { saveRoute, syncAll } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, MANTENER)
+
+    let items = await getColaItems()
+    expect(items).toHaveLength(1)
+    expect(items[0]?.propietarioUserId).toBe('user-1')
+
+    // Ahora entra OTRA cuenta en el mismo dispositivo.
+    mockGetSession.mockResolvedValue({ data: { session: { user: { id: 'user-2' } } }, error: null })
+    await syncAll()
+
+    items = await getColaItems()
+    expect(items).toHaveLength(1) // sigue ahí: no se borra ni se pierde
+    expect(items[0]?.id).toBe(id)
+    expect(items[0]?.estado).toBe('pendiente_login_otra_cuenta')
+    expect(mockUpsert).toHaveBeenCalledTimes(1) // no se reintenta con la cuenta equivocada
+
+    // Vuelve a entrar el propietario original: se sincroniza sin pérdida.
+    mockGetSession.mockResolvedValue(SESION_VALIDA)
+    mockUpsert.mockResolvedValueOnce({ data: null, error: null })
+    await syncAll()
+
+    expect(await getColaItems()).toHaveLength(0)
+    expect(mockUpsert).toHaveBeenCalledTimes(2)
+  })
+
   it('sin sesión (caducada sin red), saveRoute queda "pendiente de login" sin borrarse ni marcar error', async () => {
     mockGetSession.mockResolvedValue(SIN_SESION)
 

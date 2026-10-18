@@ -1,13 +1,20 @@
 import { openDB, type IDBPDatabase } from 'idb'
 import type { Ruta, RutaInsert } from '@/types/database.types'
 
-export type EstadoCola = 'pendiente' | 'pendiente_login' | 'error'
+export type EstadoCola = 'pendiente' | 'pendiente_login' | 'pendiente_login_otra_cuenta' | 'error'
 export type TipoOperacion = 'guardar' | 'borrar'
 export type AccionFotoCola = 'mantener' | 'reemplazar' | 'quitar'
 
 export interface ColaItem {
   id: string
   tipo: TipoOperacion
+  /** user_id de la sesión activa en el momento de encolar. Solo se
+   * sincroniza si, al intentarlo, la sesión activa sigue siendo la de
+   * este mismo usuario; si es la de otra cuenta, queda
+   * "pendiente_login_otra_cuenta" sin tocarse. null si no había ninguna
+   * sesión al encolar (no debería ocurrir desde la UI, que ya oculta
+   * guardar/borrar sin sesión, pero se maneja igual que sin sesión). */
+  propietarioUserId: string | null
   /** Datos de la ruta a guardar. null cuando tipo === 'borrar'. */
   ruta: RutaInsert | null
   /** Qué hacer con la foto al guardar. Solo se usa cuando tipo === 'guardar'. */

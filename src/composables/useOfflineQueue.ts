@@ -199,6 +199,14 @@ async function syncOne(item: ColaItem): Promise<void> {
       return
     }
 
+    // La sesión activa es de OTRA cuenta distinta de la que encoló este
+    // item: no se toca ni se borra, se reintentará solo si/cuando vuelva
+    // a entrar la cuenta propietaria.
+    if (item.propietarioUserId && item.propietarioUserId !== userId) {
+      await actualizarEstado(item.id, 'pendiente_login_otra_cuenta', null, false)
+      return
+    }
+
     try {
       if (item.tipo === 'borrar') {
         await sincronizarBorrado(item)
@@ -254,6 +262,7 @@ async function saveRoute(
   }
 
   const id = input.id ?? crypto.randomUUID()
+  const propietarioUserId = (await obtenerUserIdActual()) ?? null
 
   const ruta: RutaInsert = {
     id,
@@ -274,6 +283,7 @@ async function saveRoute(
   const item: ColaItem = {
     id,
     tipo: 'guardar',
+    propietarioUserId,
     ruta,
     accionFoto: accionFotoCola,
     foto: accionFoto.tipo === 'reemplazar' ? accionFoto.blob : null,
@@ -297,9 +307,12 @@ async function saveRoute(
  * siempre por la cola: si no hay red, queda pendiente y se reintenta.
  */
 async function deleteRoute(id: string, fotoPath: string | null): Promise<void> {
+  const propietarioUserId = (await obtenerUserIdActual()) ?? null
+
   const item: ColaItem = {
     id,
     tipo: 'borrar',
+    propietarioUserId,
     ruta: null,
     accionFoto: 'mantener',
     foto: null,
@@ -333,7 +346,8 @@ function init(): void {
     void syncAll()
   })
 
-  // Sincroniza las rutas "pendientes de login" al volver a iniciar sesión.
+  // Sincroniza las rutas "pendientes de login" al volver a iniciar sesión
+  // (con la misma cuenta que las encoló; ver la comprobación en syncOne).
   supabase.auth.onAuthStateChange((event, newSession) => {
     if (newSession && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
       void syncAll()

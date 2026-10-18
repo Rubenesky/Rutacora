@@ -15,10 +15,17 @@ import type { RutaConEstado } from './useVisibleRoutes'
 // mediante zoom/paneo (no entran todas a la vez en una vista razonable).
 const CENTRO_ESPANA: L.LatLngTuple = [40.0, -3.7]
 const ZOOM_INICIAL = 6
+const ZOOM_RUTA = 15
+const DURACION_VUELO_SEGUNDOS = 1.2
 
 export interface OpcionesLeafletMap {
   onEditarRuta?: (ruta: RutaConEstado) => void
   onBorrarRuta?: (ruta: RutaConEstado) => void
+  /** Devuelve el user_id de la sesión activa, o undefined sin sesión. Se
+   * llama en cada apertura de popup (no se guarda una copia), así que
+   * refleja el estado de login en vivo sin tener que volver a renderizar
+   * los marcadores al iniciar/cerrar sesión. */
+  obtenerUserIdSesion?: () => string | undefined
 }
 
 // Marcador distinguible para rutas que aún están pendientes de sincronizar
@@ -36,7 +43,7 @@ function formatearFecha(fecha: string): string {
   return `${dia}/${mes}/${anio}`
 }
 
-function popupHtml(ruta: RutaConEstado): string {
+function popupHtml(ruta: RutaConEstado, conAcciones: boolean): string {
   const tipo = ruta.tipo === 'circular' ? 'Circular' : ruta.tipo === 'lineal' ? 'Lineal' : '—'
   const desnivel = ruta.desnivel_m != null ? `${ruta.desnivel_m} m` : '—'
   const duracion = ruta.duracion_min != null ? `${ruta.duracion_min} min` : '—'
@@ -57,22 +64,45 @@ function popupHtml(ruta: RutaConEstado): string {
       <div class="ruta-popup-foto" data-foto-path="${ruta.foto_path ? escapeHtml(ruta.foto_path) : ''}">
         ${ruta.foto_path ? 'Cargando foto…' : ''}
       </div>
-      <div class="ruta-popup-acciones">
-        <button type="button" data-action="editar">Editar</button>
-        <button type="button" data-action="borrar">Borrar</button>
-      </div>
+      ${
+        conAcciones
+          ? '<div class="ruta-popup-acciones">' +
+            '<button type="button" data-action="editar">Editar</button>' +
+            '<button type="button" data-action="borrar">Borrar</button>' +
+            '</div>'
+          : ''
+      }
     </div>
   `
 }
 
-async function cargarFotoEnPopup(popupEl: HTMLElement): Promise<void> {
+/**
+ * Recoloca el popup (tamaño + posición + autoPan) sin regenerar su
+ * contenido. Popup.update() público SÍ regenera el contenido desde el
+ * string original (sobrescribiendo cualquier cambio manual del DOM, como
+ * la foto que se inserta después de cargar), así que aquí se llama solo a
+ * los pasos internos de recolocación, igual que hace update() salvo la
+ * regeneración de contenido.
+ */
+function reposicionarPopup(popup: L.Popup): void {
+  const interno = popup as unknown as {
+    _updateLayout?: () => void
+    _updatePosition?: () => void
+    _adjustPan?: () => void
+  }
+  interno._updateLayout?.()
+  interno._updatePosition?.()
+  interno._adjustPan?.()
+}
+
+async function cargarFotoEnPopup(popupEl: HTMLElement, popup: L.Popup): Promise<void> {
   const fotoDiv = popupEl.querySelector<HTMLElement>('.ruta-popup-foto')
   const fotoPath = fotoDiv?.dataset.fotoPath
   if (!fotoDiv || !fotoPath) return
 
   const urlCacheada = obtenerUrlCacheada(fotoPath)
   if (urlCacheada) {
-    mostrarFotoEnDiv(fotoDiv, urlCacheada)
+    mostrarFotoEnDiv(fotoDiv, urlCacheada, popup)
     return
   }
 
@@ -91,14 +121,19 @@ async function cargarFotoEnPopup(popupEl: HTMLElement): Promise<void> {
   }
 
   guardarUrlCacheada(fotoPath, data.signedUrl, SIGNED_URL_TTL_SEGUNDOS)
-  mostrarFotoEnDiv(fotoDiv, data.signedUrl)
+  mostrarFotoEnDiv(fotoDiv, data.signedUrl, popup)
 }
 
-function mostrarFotoEnDiv(fotoDiv: HTMLElement, url: string): void {
+function mostrarFotoEnDiv(fotoDiv: HTMLElement, url: string, popup: L.Popup): void {
   const img = document.createElement('img')
-  img.src = url
   img.alt = 'Foto de la ruta'
   img.loading = 'lazy'
+  // El alto del popup cambia cuando la foto termina de cargar (antes solo
+  // tenía el texto "Cargando foto…"), así que hay que recolocarlo o puede
+  // quedar cortado contra el borde del mapa. reposicionarPopup() hace solo
+  // eso, sin tocar el contenido (a diferencia de popup.update()).
+  img.onload = () => reposicionarPopup(popup)
+  img.src = url
   fotoDiv.replaceChildren(img)
 }
 
@@ -115,8 +150,8 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
   const capaInicial = (nombreGuardado && baseLayers[nombreGuardado]) || Object.values(baseLayers)[0]
   if (capaInicial) capaInicial.addTo(map)
   // "bottomleft": el zoom ocupa arriba-izquierda, la atribución abajo-derecha
-  // y el botón "Salir" de la app arriba-derecha. Así ningún control se solapa
-  // con otro en ningún tamaño de pantalla.
+  // y los botones de sesión de la app arriba-derecha. Así ningún control se
+  // solapa con otro en ningún tamaño de pantalla.
   L.control.layers(baseLayers, undefined, { position: 'bottomleft' }).addTo(map)
   map.on('baselayerchange', (evento) => guardarCapaElegida(evento.name))
 
@@ -130,34 +165,79 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     marcadoresPorId.clear()
     for (const ruta of rutas) {
       const marker = L.marker([ruta.lat, ruta.lon], ruta.pendienteSync ? { icon: iconoPendiente } : undefined)
-      marker.bindPopup(popupHtml(ruta))
+      // Contenido inicial sin acciones: al abrir el popup se regenera con
+      // setContent() ya sabiendo si hay sesión (ver más abajo).
+      marker.bindPopup(popupHtml(ruta, false))
+
       // Listener por marcador (no global): así cada popup tiene acceso por
       // closure a su propia "ruta" para las acciones de editar/borrar.
       marker.on('popupopen', (event) => {
+        // Editar/borrar solo si hay sesión Y la ruta es del usuario con
+        // sesión activa. Se comprueba en vivo (no al renderizar los
+        // marcadores), así un login/logout posterior no necesita volver a
+        // dibujar nada para que aparezcan o desaparezcan estos botones.
+        const sesionUserId = opciones.obtenerUserIdSesion?.()
+        const esPropia = Boolean(sesionUserId) && sesionUserId === ruta.user_id
+        const conAcciones = esPropia && Boolean(opciones.onEditarRuta || opciones.onBorrarRuta)
+
+        // setContent() (no appendChild + update()): regenera todo el
+        // contenido de una vez de forma soportada, evitando que una
+        // recolocación posterior borre cambios hechos a mano en el DOM.
+        event.popup.setContent(popupHtml(ruta, conAcciones))
+
         const popupEl = event.popup.getElement()
         if (!popupEl) return
 
-        void cargarFotoEnPopup(popupEl)
+        void cargarFotoEnPopup(popupEl, event.popup)
 
-        popupEl
-          .querySelector<HTMLButtonElement>('[data-action="editar"]')
-          ?.addEventListener('click', () => opciones.onEditarRuta?.(ruta))
-        popupEl
-          .querySelector<HTMLButtonElement>('[data-action="borrar"]')
-          ?.addEventListener('click', () => opciones.onBorrarRuta?.(ruta))
+        if (conAcciones) {
+          popupEl
+            .querySelector<HTMLButtonElement>('[data-action="editar"]')
+            ?.addEventListener('click', () => opciones.onEditarRuta?.(ruta))
+          popupEl
+            .querySelector<HTMLButtonElement>('[data-action="borrar"]')
+            ?.addEventListener('click', () => opciones.onBorrarRuta?.(ruta))
+        }
       })
       clusterGroup.addLayer(marker)
       marcadoresPorId.set(ruta.id, marker)
     }
   }
 
-  /** Centra el mapa en esa ruta y abre su popup (usado desde el panel de
-   * lista). zoomToShowLayer se encarga de "desagrupar" el cluster si el
-   * marcador está dentro de uno colapsado. */
-  function centrarYAbrirRuta(id: string): void {
-    const marker = marcadoresPorId.get(id)
+  /**
+   * Vuela a la ruta indicada: zoom predecible (ZOOM_RUTA, topado al máximo
+   * de la capa activa), compensando el ancho del panel lateral en
+   * escritorio para que el punto no quede detrás de él, y abre su popup.
+   * Si el marcador está dentro de un cluster colapsado, usa
+   * zoomToShowLayer() para desagruparlo primero.
+   */
+  function flyToRoute(ruta: RutaConEstado, anchoPanelLateralPx = 0): void {
+    const marker = marcadoresPorId.get(ruta.id)
     if (!marker) return
-    clusterGroup.zoomToShowLayer(marker, () => marker.openPopup())
+
+    if (clusterGroup.getVisibleParent(marker) !== marker) {
+      clusterGroup.zoomToShowLayer(marker, () => marker.openPopup())
+      return
+    }
+
+    const zoomDestino = Math.min(ZOOM_RUTA, map.getMaxZoom())
+    const prefiereMovimientoReducido = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    let destino = L.latLng(ruta.lat, ruta.lon)
+    if (anchoPanelLateralPx > 0) {
+      const punto = map.project(destino, zoomDestino)
+      const puntoDesplazado = punto.subtract(L.point(anchoPanelLateralPx / 2, 0))
+      destino = map.unproject(puntoDesplazado, zoomDestino)
+    }
+
+    if (prefiereMovimientoReducido) {
+      map.setView(destino, zoomDestino)
+      marker.openPopup()
+      return
+    }
+
+    map.once('moveend', () => marker.openPopup())
+    map.flyTo(destino, zoomDestino, { duration: DURACION_VUELO_SEGUNDOS })
   }
 
   // --- Selección de ubicación (para el formulario de añadir/editar ruta) ---
@@ -210,6 +290,6 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     iniciarSeleccionUbicacion,
     moverSeleccion,
     finalizarSeleccionUbicacion,
-    centrarYAbrirRuta,
+    flyToRoute,
   }
 }

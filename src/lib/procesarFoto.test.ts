@@ -100,6 +100,8 @@ describe('recomprimirImagen: orientación y redimensionado', () => {
   it('con orientación 6 (foto vertical), intercambia ancho/alto y rota el contenido', async () => {
     // Imagen "en bruto" de 40x30 (como la guardaría la cámara tumbada) con
     // una marca roja en la esquina superior-izquierda bruta; el resto blanco.
+    // Timeout ampliado: codificación real con node-canvas, lenta bajo
+    // contención cuando corre toda la suite (ya mucho más grande) en paralelo.
     const anchoBruto = 40
     const altoBruto = 30
     const canvasFuente = createCanvas(anchoBruto, altoBruto)
@@ -132,7 +134,7 @@ describe('recomprimirImagen: orientación y redimensionado', () => {
     )
     // La esquina superior-izquierda, que en bruto era roja, ya no debe serlo.
     expect(esAproximadamente(leerPixel(datos as unknown as ImageData, 2, 2), [255, 255, 255])).toBe(true)
-  })
+  }, 15_000)
 
   it('redimensiona respetando el máximo de 1600px en el lado largo', async () => {
     const canvasFuente = createCanvas(3000, 2000)
