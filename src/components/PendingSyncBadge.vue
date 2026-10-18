@@ -8,6 +8,11 @@ function etiquetaEstado(estado: string): string {
   if (estado === 'error') return 'Error al sincronizar, pulsa para reintentar'
   return 'Pendiente de sincronizar'
 }
+
+function etiquetaOperacion(item: { tipo: string; ruta: { nombre: string } | null }): string {
+  if (item.tipo === 'borrar') return 'Borrar ruta'
+  return item.ruta?.nombre ?? 'Ruta'
+}
 </script>
 
 <template>
@@ -27,7 +32,7 @@ function etiquetaEstado(estado: string): string {
         v-for="item in pendientes"
         :key="item.id"
       >
-        <span>{{ item.ruta.nombre }} — {{ etiquetaEstado(item.estado) }}</span>
+        <span>{{ etiquetaOperacion(item) }} — {{ etiquetaEstado(item.estado) }}</span>
         <button
           type="button"
           @click="retry(item.id)"

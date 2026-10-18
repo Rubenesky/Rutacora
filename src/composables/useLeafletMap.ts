@@ -16,6 +16,11 @@ const ZOOM_INICIAL = 6
 const FOTOS_BUCKET = 'fotos-rutas'
 const SIGNED_URL_TTL_SEGUNDOS = 60 * 60
 
+export interface OpcionesLeafletMap {
+  onEditarRuta?: (ruta: Ruta) => void
+  onBorrarRuta?: (ruta: Ruta) => void
+}
+
 function formatearFecha(fecha: string): string {
   const [anio, mes, dia] = fecha.split('-')
   if (!anio || !mes || !dia) return fecha
@@ -42,6 +47,10 @@ function popupHtml(ruta: Ruta): string {
       <div class="ruta-popup-foto" data-foto-path="${ruta.foto_path ? escapeHtml(ruta.foto_path) : ''}">
         ${ruta.foto_path ? 'Cargando foto…' : ''}
       </div>
+      <div class="ruta-popup-acciones">
+        <button type="button" data-action="editar">Editar</button>
+        <button type="button" data-action="borrar">Borrar</button>
+      </div>
     </div>
   `
 }
@@ -67,7 +76,7 @@ async function cargarFotoEnPopup(popupEl: HTMLElement): Promise<void> {
   fotoDiv.replaceChildren(img)
 }
 
-export function useLeafletMap(container: HTMLElement) {
+export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletMap = {}) {
   const map = L.map(container, {
     center: CENTRO_ESPANA,
     zoom: ZOOM_INICIAL,
@@ -86,23 +95,79 @@ export function useLeafletMap(container: HTMLElement) {
   const clusterGroup = L.markerClusterGroup()
   map.addLayer(clusterGroup)
 
-  map.on('popupopen', (event) => {
-    const popupEl = event.popup.getElement()
-    if (popupEl) void cargarFotoEnPopup(popupEl)
-  })
-
   function renderRutas(rutas: Ruta[]): void {
     clusterGroup.clearLayers()
     for (const ruta of rutas) {
       const marker = L.marker([ruta.lat, ruta.lon])
       marker.bindPopup(popupHtml(ruta))
+      // Listener por marcador (no global): así cada popup tiene acceso por
+      // closure a su propia "ruta" para las acciones de editar/borrar.
+      marker.on('popupopen', (event) => {
+        const popupEl = event.popup.getElement()
+        if (!popupEl) return
+
+        void cargarFotoEnPopup(popupEl)
+
+        popupEl
+          .querySelector<HTMLButtonElement>('[data-action="editar"]')
+          ?.addEventListener('click', () => opciones.onEditarRuta?.(ruta))
+        popupEl
+          .querySelector<HTMLButtonElement>('[data-action="borrar"]')
+          ?.addEventListener('click', () => opciones.onBorrarRuta?.(ruta))
+      })
       clusterGroup.addLayer(marker)
     }
   }
+
+  // --- Selección de ubicación (para el formulario de añadir/editar ruta) ---
+  let marcadorSeleccion: L.Marker | null = null
+  let onCambioSeleccion: ((lat: number, lon: number) => void) | null = null
+
+  function moverSeleccion(lat: number, lon: number): void {
+    marcadorSeleccion?.setLatLng([lat, lon])
+  }
+
+  function iniciarSeleccionUbicacion(
+    lat: number,
+    lon: number,
+    onCambio: (lat: number, lon: number) => void,
+  ): void {
+    onCambioSeleccion = onCambio
+    if (marcadorSeleccion) {
+      marcadorSeleccion.setLatLng([lat, lon])
+    } else {
+      marcadorSeleccion = L.marker([lat, lon], { draggable: true }).addTo(map)
+      marcadorSeleccion.on('dragend', () => {
+        const pos = marcadorSeleccion?.getLatLng()
+        if (pos) onCambioSeleccion?.(pos.lat, pos.lng)
+      })
+    }
+  }
+
+  function finalizarSeleccionUbicacion(): void {
+    if (marcadorSeleccion) {
+      map.removeLayer(marcadorSeleccion)
+      marcadorSeleccion = null
+    }
+    onCambioSeleccion = null
+  }
+
+  map.on('click', (event: L.LeafletMouseEvent) => {
+    if (!onCambioSeleccion) return
+    moverSeleccion(event.latlng.lat, event.latlng.lng)
+    onCambioSeleccion(event.latlng.lat, event.latlng.lng)
+  })
 
   function destroy(): void {
     map.remove()
   }
 
-  return { map, renderRutas, destroy }
+  return {
+    map,
+    renderRutas,
+    destroy,
+    iniciarSeleccionUbicacion,
+    moverSeleccion,
+    finalizarSeleccionUbicacion,
+  }
 }

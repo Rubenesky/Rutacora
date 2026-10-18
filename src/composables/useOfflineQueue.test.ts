@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getColaItems } from '@/lib/offlineDb'
 import type { Dificultad } from '@/types/database.types'
 
-const { mockGetSession, mockUpload, mockUpsert, mockOnAuthStateChange } = vi.hoisted(() => ({
-  mockGetSession: vi.fn(),
-  mockUpload: vi.fn(),
-  mockUpsert: vi.fn(),
-  mockOnAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
-}))
+const { mockGetSession, mockUpload, mockUpsert, mockDeleteEq, mockRemove, mockOnAuthStateChange } =
+  vi.hoisted(() => ({
+    mockGetSession: vi.fn(),
+    mockUpload: vi.fn(),
+    mockUpsert: vi.fn(),
+    mockDeleteEq: vi.fn(),
+    mockRemove: vi.fn(),
+    mockOnAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+  }))
 
 vi.mock('@/lib/supabaseClient', () => ({
   supabase: {
@@ -16,9 +19,9 @@ vi.mock('@/lib/supabaseClient', () => ({
       onAuthStateChange: mockOnAuthStateChange,
     },
     storage: {
-      from: () => ({ upload: mockUpload }),
+      from: () => ({ upload: mockUpload, remove: mockRemove }),
     },
-    from: () => ({ upsert: mockUpsert }),
+    from: () => ({ upsert: mockUpsert, delete: () => ({ eq: mockDeleteEq }) }),
   },
 }))
 
@@ -45,9 +48,13 @@ beforeEach(async () => {
   mockGetSession.mockReset()
   mockUpload.mockReset()
   mockUpsert.mockReset()
+  mockDeleteEq.mockReset()
+  mockRemove.mockReset()
   mockGetSession.mockResolvedValue(SESION_VALIDA)
   mockUpload.mockResolvedValue({ data: { path: 'x' }, error: null })
   mockUpsert.mockResolvedValue({ data: null, error: null })
+  mockDeleteEq.mockResolvedValue({ data: null, error: null })
+  mockRemove.mockResolvedValue({ data: null, error: null })
 })
 
 describe('useOfflineQueue', () => {
@@ -176,5 +183,65 @@ describe('useOfflineQueue', () => {
 
     expect(await getColaItems()).toHaveLength(0)
     expect(mockUpsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('useOfflineQueue: deleteRoute (borrado por la cola, igual que el guardado)', () => {
+  it('borra primero la fila y después la foto (en ese orden)', async () => {
+    const orden: string[] = []
+    mockDeleteEq.mockImplementation(async () => {
+      orden.push('fila')
+      return { data: null, error: null }
+    })
+    mockRemove.mockImplementation(async () => {
+      orden.push('foto')
+      return { data: null, error: null }
+    })
+
+    const { deleteRoute } = useOfflineQueue()
+    await deleteRoute('ruta-1', 'user-1/ruta-1.jpg')
+
+    expect(orden).toEqual(['fila', 'foto'])
+    expect(await getColaItems()).toHaveLength(0)
+  })
+
+  it('un borrado sin foto no intenta borrar nada en Storage', async () => {
+    const { deleteRoute } = useOfflineQueue()
+    await deleteRoute('ruta-1', null)
+
+    expect(mockDeleteEq).toHaveBeenCalledTimes(1)
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+
+  it('un reintento de borrado es idempotente: siempre usa el mismo id, sin duplicar nada', async () => {
+    mockDeleteEq
+      .mockResolvedValueOnce({ data: null, error: { message: 'fallo temporal' } })
+      .mockResolvedValueOnce({ data: null, error: null })
+
+    const { deleteRoute, retry } = useOfflineQueue()
+    await deleteRoute('ruta-1', null)
+
+    let items = await getColaItems()
+    expect(items).toHaveLength(1)
+    expect(items[0]?.estado).toBe('error')
+
+    await retry('ruta-1')
+
+    expect(mockDeleteEq).toHaveBeenCalledTimes(2)
+    items = await getColaItems()
+    expect(items).toHaveLength(0)
+  })
+
+  it('borrar sin sesión (caducada sin red) deja el borrado "pendiente de login", sin borrar nada aún', async () => {
+    mockGetSession.mockResolvedValue(SIN_SESION)
+
+    const { deleteRoute } = useOfflineQueue()
+    await deleteRoute('ruta-1', 'user-1/ruta-1.jpg')
+
+    const items = await getColaItems()
+    expect(items).toHaveLength(1)
+    expect(items[0]?.estado).toBe('pendiente_login')
+    expect(mockDeleteEq).not.toHaveBeenCalled()
+    expect(mockRemove).not.toHaveBeenCalled()
   })
 })

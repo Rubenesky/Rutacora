@@ -52,37 +52,23 @@ npx supabase gen types typescript --project-id TU_PROJECT_ID > src/types/databas
 
 La capa "IGN (Mapa Topográfico Nacional)" usa una URL de teselas WMTS construida a partir de parámetros oficiales confirmados en el `GetCapabilities` del IGN (capa `MTN`, `tilematrixset=GoogleMapsCompatible`, formato `image/jpeg`), pero el IGN no publica una plantilla "lista para usar" en Leaflet. Al probar la app en local, comprueba visualmente que esa capa carga teselas correctamente; si no es así, dímelo.
 
-## Cola offline y `saveRoute()`
+## Cola offline: `saveRoute()` y `deleteRoute()`
 
-`saveRoute()` (en `src/composables/useOfflineQueue.ts`) es el único punto de entrada para guardar una ruta: escribe primero en IndexedDB y después intenta sincronizar con Supabase (foto primero, luego la fila, con upsert idempotente por id). El formulario y las fotos (bloque 4) deben llamar siempre a esta función, nunca a Supabase directamente.
+`src/composables/useOfflineQueue.ts` es el único punto de entrada para escribir en Supabase desde la UI:
 
-### `window.__rutacora` (TEMPORAL, solo desarrollo)
+- `saveRoute()`: guarda una ruta nueva o editada. Escribe primero en IndexedDB y después intenta sincronizar (foto antes que la fila, upsert idempotente por id).
+- `deleteRoute()`: borra una ruta. Pasa por la misma cola: si no hay red, queda pendiente y se reintenta igual que un guardado (borra primero la fila, después la foto del Storage).
 
-Mientras no existe el formulario, `src/devtools.ts` expone `saveRoute`, `pendientes`, `syncAll` y `retry` en `window.__rutacora`, **solo si `import.meta.env.DEV` es `true`** (no existe en el build de producción). Sirve para probar la cola desde la consola del navegador:
+El formulario (`RouteFormModal.vue`) y el mapa (`MapView.vue`) llaman siempre a estas funciones; nunca a Supabase directamente.
 
-```js
-await window.__rutacora.saveRoute(
-  {
-    nombre: 'Prueba cerca de Granada',
-    lat: 37.17,
-    lon: -3.6,
-    distancia_km: 8.5,
-    desnivel_m: 350,
-    duracion_min: 150,
-    tipo: 'circular',
-    fecha: '2026-10-18',
-    dificultad: 'media',
-    notas: 'Ruta de prueba.',
-  },
-  null,
-)
+> El `window.__rutacora` que existió temporalmente para probar la cola antes de tener el formulario ya se ha retirado (era solo para desarrollo, bloque 3).
 
-window.__rutacora.pendientes.value // estado actual de la cola
-```
+## Formulario de ruta
 
-**Esto es temporal:** `src/devtools.ts` y su conexión en `src/main.ts` se retiran al cerrar el bloque del formulario (bloque 4), cuando ya haya una UI real para guardar rutas.
+Botón "+ Añadir ruta" bajo el mapa, y "Editar"/"Borrar" en el popup de cada ruta. Tres formas de fijar la ubicación (todas rellenan el mismo lat/lon): tocar el mapa, arrastrar el marcador, o el botón "Usar mi ubicación" (si el permiso de geolocalización se deniega, se muestra un aviso y se puede seguir con el mapa o las coordenadas a mano). Validación en cliente (nombre, rango de lat/lon, distancia > 0, fecha obligatoria, dificultad de la lista canónica).
 
 ## Pendiente de documentar (bloques siguientes)
 
+- Fotos (EXIF + compresión) en el formulario.
 - Configuración de variables en Netlify y despliegue.
 - Verificación del keep-alive (Netlify Scheduled Function contra `public.keepalive`).

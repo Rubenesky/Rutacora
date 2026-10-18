@@ -108,3 +108,23 @@ button {
   border-radius: var(--radius);
   display: block;
 }
+
+.ruta-popup-acciones {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.ruta-popup-acciones button {
+  flex: 1;
+  font-size: 13px;
+  padding: 0 var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.ruta-popup-acciones button[data-action='borrar'] {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}

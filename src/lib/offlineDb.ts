@@ -2,11 +2,17 @@ import { openDB, type IDBPDatabase } from 'idb'
 import type { RutaInsert } from '@/types/database.types'
 
 export type EstadoCola = 'pendiente' | 'pendiente_login' | 'error'
+export type TipoOperacion = 'guardar' | 'borrar'
 
 export interface ColaItem {
   id: string
-  ruta: RutaInsert
+  tipo: TipoOperacion
+  /** Datos de la ruta a guardar. null cuando tipo === 'borrar'. */
+  ruta: RutaInsert | null
+  /** Foto de portada a subir. Solo se usa cuando tipo === 'guardar'. */
   foto: Blob | null
+  /** Ruta del Storage a borrar junto con la fila. Solo cuando tipo === 'borrar'. */
+  fotoPathABorrar: string | null
   estado: EstadoCola
   intentos: number
   errorMensaje: string | null

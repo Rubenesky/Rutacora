@@ -61,21 +61,68 @@ async function actualizarEstado(
   await refrescarPendientes()
 }
 
+async function obtenerUserIdActual(): Promise<string | undefined> {
+  // getSession() no debería lanzar, pero si falla el refresco del token sin
+  // red, lo tratamos igual que "sin sesión" en vez de romper la sincronización.
+  try {
+    const { data: sessionData } = await supabase.auth.getSession()
+    return sessionData.session?.user.id
+  } catch {
+    return undefined
+  }
+}
+
+async function sincronizarGuardado(item: ColaItem, userId: string): Promise<void> {
+  if (!item.ruta) return
+
+  const fotoPath = item.foto ? `${userId}/${item.id}.jpg` : null
+
+  // Orden: primero la foto (con upsert, idempotente), después la fila. Si
+  // falla a mitad (foto subida, fila no), el reintento vuelve a subir la
+  // misma foto (no duplica) y reintenta la fila con el mismo id (upsert,
+  // tampoco duplica).
+  //
+  // No se envía "user_id": se deja al valor por defecto de la columna
+  // (auth.uid()), que la propia base de datos rellena a partir del usuario
+  // autenticado de la petición, en vez de un cálculo hecho en el cliente.
+  if (item.foto && fotoPath) {
+    const { error: errorSubida } = await supabase.storage
+      .from(FOTOS_BUCKET)
+      .upload(fotoPath, item.foto, { upsert: true, contentType: 'image/jpeg' })
+
+    if (errorSubida) throw new Error('No se pudo subir la foto.')
+  }
+
+  const { error: errorFila } = await supabase
+    .from('rutas')
+    .upsert({ ...item.ruta, id: item.id, foto_path: fotoPath }, { onConflict: 'id' })
+
+  if (errorFila) throw new Error('No se pudo guardar la ruta.')
+}
+
+async function sincronizarBorrado(item: ColaItem): Promise<void> {
+  // Orden: primero la fila, después la foto. Así una ruta nunca queda
+  // visible en el mapa con una foto rota si falla a mitad; en el peor caso
+  // (falla el borrado de la foto) queda un archivo huérfano en Storage, sin
+  // impacto visible, y el reintento lo limpia.
+  const { error: errorFila } = await supabase.from('rutas').delete().eq('id', item.id)
+  if (errorFila) throw new Error('No se pudo borrar la ruta.')
+
+  if (item.fotoPathABorrar) {
+    const { error: errorFoto } = await supabase.storage
+      .from(FOTOS_BUCKET)
+      .remove([item.fotoPathABorrar])
+
+    if (errorFoto) throw new Error('No se pudo borrar la foto.')
+  }
+}
+
 async function syncOne(item: ColaItem): Promise<void> {
   if (sincronizando.has(item.id)) return
   sincronizando.add(item.id)
 
   try {
-    // getSession() no debería lanzar, pero si falla el refresco del token
-    // sin red, lo tratamos igual que "sin sesión" en vez de romper el resto
-    // de la sincronización.
-    let userId: string | undefined
-    try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      userId = sessionData.session?.user.id
-    } catch {
-      userId = undefined
-    }
+    const userId = await obtenerUserIdActual()
 
     // Sin sesión usable (sin login, o caducada sin red para poder
     // refrescarla): no se borra nada ni se marca como error definitivo.
@@ -85,31 +132,12 @@ async function syncOne(item: ColaItem): Promise<void> {
       return
     }
 
-    const fotoPath = item.foto ? `${userId}/${item.id}.jpg` : null
-
-    // Orden de sincronización: primero la foto (con upsert, idempotente),
-    // después la fila. Si falla a mitad (foto subida, fila no), el
-    // reintento vuelve a subir la misma foto (no duplica) y reintenta
-    // la fila con el mismo id (upsert, tampoco duplica).
-    //
-    // No se envía "user_id": se deja al valor por defecto de la columna
-    // (auth.uid()), que la propia base de datos rellena a partir del
-    // usuario autenticado de la petición. Así nunca depende de un cálculo
-    // hecho en el cliente.
     try {
-      if (item.foto && fotoPath) {
-        const { error: errorSubida } = await supabase.storage
-          .from(FOTOS_BUCKET)
-          .upload(fotoPath, item.foto, { upsert: true, contentType: 'image/jpeg' })
-
-        if (errorSubida) throw new Error('No se pudo subir la foto.')
+      if (item.tipo === 'borrar') {
+        await sincronizarBorrado(item)
+      } else {
+        await sincronizarGuardado(item, userId)
       }
-
-      const { error: errorFila } = await supabase
-        .from('rutas')
-        .upsert({ ...item.ruta, id: item.id, foto_path: fotoPath }, { onConflict: 'id' })
-
-      if (errorFila) throw new Error('No se pudo guardar la ruta.')
 
       await deleteColaItem(item.id)
       await refrescarPendientes()
@@ -162,8 +190,10 @@ async function saveRoute(input: GuardarRutaInput, foto: Blob | null): Promise<st
 
   const item: ColaItem = {
     id,
+    tipo: 'guardar',
     ruta,
     foto,
+    fotoPathABorrar: null,
     estado: 'pendiente',
     intentos: 0,
     errorMensaje: null,
@@ -177,9 +207,31 @@ async function saveRoute(input: GuardarRutaInput, foto: Blob | null): Promise<st
   return id
 }
 
+/**
+ * Único punto de entrada para borrar una ruta. Igual que saveRoute(), pasa
+ * siempre por la cola: si no hay red, queda pendiente y se reintenta.
+ */
+async function deleteRoute(id: string, fotoPath: string | null): Promise<void> {
+  const item: ColaItem = {
+    id,
+    tipo: 'borrar',
+    ruta: null,
+    foto: null,
+    fotoPathABorrar: fotoPath,
+    estado: 'pendiente',
+    intentos: 0,
+    errorMensaje: null,
+    creadoEn: new Date().toISOString(),
+  }
+
+  await putColaItem(item)
+  await refrescarPendientes()
+  await syncAll()
+}
+
 async function retry(id: string): Promise<void> {
   const item = pendientes.value.find((pendiente) => pendiente.id === id)
-  if (item) await syncOne(item)
+  if (item) await syncOne(toRaw(item))
 }
 
 function init(): void {
@@ -205,7 +257,7 @@ function init(): void {
 init()
 
 export function useOfflineQueue() {
-  return { pendientes, saveRoute, retry, syncAll }
+  return { pendientes, saveRoute, deleteRoute, retry, syncAll }
 }
 
 /** Solo para tests. */
