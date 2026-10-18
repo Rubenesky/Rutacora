@@ -10,7 +10,7 @@ PWA personal para registrar y ver en un mapa de España las rutas de senderismo 
 - Leaflet + leaflet.markercluster (en un composable propio, sin vue-leaflet)
 - Supabase (Postgres + Storage + Auth)
 - vite-plugin-pwa + idb (cola offline)
-- exifr + browser-image-compression
+- exifr (lectura de EXIF) + compresión propia sobre `canvas` (sin `browser-image-compression`: se implementó a mano para controlar con precisión la orientación y poder testearla de forma determinista — ver "Fotos" más abajo)
 - Despliegue en Netlify
 
 ## Desarrollo
