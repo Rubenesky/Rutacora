@@ -6,6 +6,7 @@ import AppHeader from '@/components/AppHeader.vue'
 import LoginModal from '@/components/LoginModal.vue'
 import MapView from '@/components/MapView.vue'
 import PendingSyncBadge from '@/components/PendingSyncBadge.vue'
+import UpdateAvailableBanner from '@/components/UpdateAvailableBanner.vue'
 
 const { session, logout } = useAuth()
 const { panelActivo, cerrarPanel } = usePanelOverlay()
@@ -19,6 +20,7 @@ const mapViewRef = ref<InstanceType<typeof MapView> | null>(null)
       @cerrar-sesion="logout"
       @anadir-ruta="mapViewRef?.abrirFormularioNuevo()"
     />
+    <UpdateAvailableBanner />
     <PendingSyncBadge />
     <div class="map-wrapper">
       <MapView ref="mapViewRef" />

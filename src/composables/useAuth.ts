@@ -10,10 +10,27 @@ function init() {
   if (initialized) return
   initialized = true
 
-  void supabase.auth.getSession().then(({ data }) => {
-    session.value = data.session
-    isReady.value = true
-  })
+  // supabase-js ya conserva la sesión guardada ante un fallo de RED al
+  // refrescar el token (solo la borra ante un rechazo EXPLÍCITO del
+  // servidor, p. ej. refresh_token inválido/revocado) — ver GoTrueClient:
+  // _callRefreshToken distingue isAuthRetryableFetchError (red) de un
+  // AuthError no reintentable antes de llamar a _removeSession(). El
+  // .catch() de abajo es solo una defensa adicional: si getSession()
+  // rechazara por algo inesperado (no debería, pero no está documentado
+  // como imposible), isReady igualmente pasa a true en vez de quedarse
+  // colgado para siempre y bloquear fetchRutas() (que espera a isReady
+  // antes de pedir las rutas), dejando la app sin arrancar sin red.
+  void supabase.auth
+    .getSession()
+    .then(({ data }) => {
+      session.value = data.session
+    })
+    .catch(() => {
+      session.value = null
+    })
+    .finally(() => {
+      isReady.value = true
+    })
 
   supabase.auth.onAuthStateChange((_event, newSession) => {
     session.value = newSession

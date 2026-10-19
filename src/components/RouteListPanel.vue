@@ -2,7 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { ordenarRutas, type CriterioOrden, type DireccionOrden } from '@/lib/ordenarRutas'
 import { guardarOrdenElegido, leerOrdenGuardado } from '@/lib/preferenciaOrdenRutas'
+import { useInstallPrompt } from '@/composables/useInstallPrompt'
 import type { RutaConEstado } from '@/composables/useVisibleRoutes'
+
+const { disponible: instalacionDisponible, instalar } = useInstallPrompt()
 
 const props = defineProps<{
   abierto: boolean
@@ -129,6 +132,15 @@ function onSeleccionar(ruta: RutaConEstado): void {
         </button>
       </li>
     </ul>
+
+    <button
+      v-if="instalacionDisponible"
+      type="button"
+      class="panel-instalar"
+      @click="instalar"
+    >
+      Instalar app
+    </button>
   </div>
 </template>
 
@@ -246,5 +258,16 @@ function onSeleccionar(ruta: RutaConEstado): void {
   font-size: 12px;
   font-weight: 600;
   color: #7a5b00;
+}
+
+.panel-instalar {
+  flex-shrink: 0;
+  margin: var(--space-2);
+  min-height: 44px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
 </style>

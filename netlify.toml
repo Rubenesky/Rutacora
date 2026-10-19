@@ -3,10 +3,60 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# SPA: cualquier ruta sin archivo estático real sirve index.html (para que
+# la navegación del cliente funcione al recargar). force = false (el valor
+# por defecto, explícito aquí): Netlify sirve primero cualquier archivo que
+# exista de verdad en "dist" o cualquier función en /.netlify/*, y solo
+# aplica este redirect si no encuentra nada — nunca pisa esas rutas.
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+  force = false
 
 [functions]
   node_bundler = "esbuild"
+
+# El shell y los archivos que controlan qué versión se sirve nunca se
+# cachean: si el navegador los sirviera desde caché, podría tardar en
+# enterarse de que hay una versión nueva (o, peor, servir un index.html
+# viejo apuntando a assets que ya no existen tras un deploy).
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/workbox-*.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+# Los archivos de /assets/ llevan un hash de contenido en el nombre (los
+# genera Vite): si cambia el contenido, cambia el nombre, así que se pueden
+# cachear para siempre sin riesgo de servir una versión vieja.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Cabeceras de seguridad básicas, en todas las rutas.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # Solo el propio origen puede pedir geolocalización (usada en el
+    # formulario, botón "Usar mi ubicación") o cámara (el selector de foto
+    # no usa getUserMedia, pero se deja explícito en vez de implícito).
+    # Todo lo demás, denegado.
+    Permissions-Policy = "geolocation=(self), camera=(self)"

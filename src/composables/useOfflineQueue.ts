@@ -59,6 +59,11 @@ function esErrorDeCuota(err: unknown): boolean {
 
 const pendientes = ref<ColaItem[]>([])
 const sincronizando = new Set<string>()
+// Reactivo (a diferencia de "sincronizando", un Set plano): permite que
+// otras partes de la app (el aviso de actualización de la PWA) sepan si hay
+// una sincronización en curso ahora mismo, para posponer una actualización
+// del service worker hasta que termine.
+const haySincronizacionEnCurso = ref(false)
 let inicializado = false
 
 function esDificultadValida(valor: string): valor is Dificultad {
@@ -187,6 +192,7 @@ async function sincronizarBorrado(item: ColaItem): Promise<void> {
 async function syncOne(item: ColaItem): Promise<void> {
   if (sincronizando.has(item.id)) return
   sincronizando.add(item.id)
+  haySincronizacionEnCurso.value = true
 
   try {
     const userId = await obtenerUserIdActual()
@@ -233,6 +239,7 @@ async function syncOne(item: ColaItem): Promise<void> {
     }
   } finally {
     sincronizando.delete(item.id)
+    haySincronizacionEnCurso.value = sincronizando.size > 0
   }
 }
 
@@ -358,13 +365,14 @@ function init(): void {
 init()
 
 export function useOfflineQueue() {
-  return { pendientes, saveRoute, deleteRoute, retry, syncAll }
+  return { pendientes, saveRoute, deleteRoute, retry, syncAll, haySincronizacionEnCurso }
 }
 
 /** Solo para tests. */
 export async function _resetParaTests(): Promise<void> {
   await clearColaDb()
   sincronizando.clear()
+  haySincronizacionEnCurso.value = false
   await refrescarPendientes()
 }
 

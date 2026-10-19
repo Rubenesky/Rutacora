@@ -1,100 +1,219 @@
 # Rutácora
 
-PWA personal para registrar y ver en un mapa de España las rutas de senderismo realizadas. Pensada para usarse desde el móvil (Android), a menudo sin cobertura, justo al terminar cada ruta.
+Rutas de senderismo en un mapa interactivo de España: un único editor con sesión, y mapa de solo lectura abierto a cualquier visitante.
 
-> Estado: en construcción por bloques. Este README se completará en el bloque final con los pasos exactos de despliegue.
+[![CI](https://github.com/Rubenesky/Rutacora/actions/workflows/ci.yml/badge.svg)](https://github.com/Rubenesky/Rutacora/actions/workflows/ci.yml)
 
-## Stack
+**Demo:** <!-- TODO: URL de Netlify tras el despliegue -->
 
-- Vite + Vue 3 (Composition API, `<script setup>`) + TypeScript estricto
-- Leaflet + leaflet.markercluster (en un composable propio, sin vue-leaflet)
-- Supabase (Postgres + Storage + Auth)
-- vite-plugin-pwa + idb (cola offline)
-- exifr (lectura de EXIF) + compresión propia sobre `canvas` (sin `browser-image-compression`: se implementó a mano para controlar con precisión la orientación y poder testearla de forma determinista — ver "Fotos" más abajo)
-- Despliegue en Netlify
+## Qué es y por qué
 
-## Desarrollo
+Después de una ruta de senderismo, lo normal es querer apuntar dónde ha sido, cuánto ha durado y cómo de dura era, muchas veces con el móvil sin cobertura y la batería baja. Rutácora es ese cuaderno: un mapa donde cada ruta queda marcada con sus datos y una foto, pensado para usarse en el momento, en el campo, con o sin conexión. El mapa en sí es público (cualquiera puede verlo y consultar las rutas), pero solo quien tiene sesión puede añadir, editar o borrar — sus propias rutas, nunca las de otra persona.
 
-```bash
-npm install
-npm run dev        # servidor de desarrollo
-npm run lint        # ESLint
-npm run typecheck   # vue-tsc
-npm test            # Vitest
-npm run build        # build de producción
+## Funcionalidades
+
+- Mapa interactivo (Leaflet) con capas OpenStreetMap, OpenTopoMap, IGN (Mapa Topográfico Nacional) y PNOA (ortofoto satélite), con agrupación de marcadores (clustering).
+- Lectura pública sin necesidad de cuenta: nombre, ubicación, distancia, desnivel, duración, tipo, fecha, dificultad, notas y foto de cada ruta.
+- Sesión (un único editor) para añadir, editar y borrar rutas: formulario con ubicación por mapa, arrastre del marcador o geolocalización del dispositivo.
+- Foto de portada por ruta: EXIF leído solo para auto-rellenar la ubicación (nunca se sube), orientación corregida, redimensionada y recomprimida en el propio navegador antes de subirla.
+- Lista de rutas ordenable (nombre, fecha, distancia), con panel lateral en escritorio y hoja inferior en móvil.
+- Cola de guardado offline: añadir, editar y borrar funcionan sin conexión y se sincronizan solos al recuperarla.
+- PWA instalable, con el shell disponible sin conexión y aviso de actualización que nunca recarga la página sin permiso.
+
+## Capturas
+
+_(Carpeta `docs/img/`, con datos de ejemplo — ver la lista de capturas pendientes en la respuesta donde se entregó este README.)_
+
+| | |
+|---|---|
+| ![Mapa público](docs/img/mapa-publico.png) Mapa público, sin sesión | ![Popup con sesión](docs/img/popup-con-sesion.png) Popup de una ruta propia, con sesión |
+| ![Formulario](docs/img/formulario-anadir-ruta.png) Formulario "Añadir ruta" | ![Panel de rutas](docs/img/panel-rutas-movil.png) Panel "Rutas" en móvil |
+
+## Stack y decisiones
+
+| Decisión | Motivo |
+|---|---|
+| Vue 3 (Composition API, `<script setup>`) + Vite + TypeScript estricto | Stack moderno, tipado de extremo a extremo, arranque de desarrollo rápido. |
+| Leaflet + leaflet.markercluster directo, sin wrapper (`vue-leaflet` u otro) | El mapa necesita control fino sobre popups con contenido dinámico (acciones según sesión, foto cargada tarde) y recolocación manual; un wrapper añadía una capa de indirección sin aportar nada aquí. |
+| Supabase (Postgres + Auth + Storage) | Backend completo sin mantener servidor propio; RLS a nivel de fila y de columna resuelve el modelo "público de lectura, privado de escritura" sin lógica de autorización en el cliente. |
+| Cola offline en IndexedDB (`idb`), no una librería de sincronización genérica | El caso de uso es simple y acotado (guardar/editar/borrar una ruta) y necesita reglas propias (qué pasa si caduca la sesión, qué pasa si la foto falla a mitad); una librería genérica no encajaba mejor que escribirlo directamente. |
+| Compresión de foto propia sobre `canvas`, no `browser-image-compression` | Se necesitaba control exacto sobre la corrección de orientación EXIF y un resultado determinista para poder testearlo; la librería de terceros no ofrecía ese control fino (ver `src/lib/procesarFoto.ts`). |
+| PWA con `vite-plugin-pwa` | Integración directa con Vite, service worker generado (Workbox) sin mantenerlo a mano. |
+| Netlify | Despliegue estático con funciones programadas incluidas (para el keep-alive, ver "Hoja de ruta": todavía no implementada) y variables de entorno gestionadas. |
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+  subgraph Cliente["Cliente (PWA)"]
+    UI["Vue 3 + Leaflet"]
+    Cola["Cola offline (IndexedDB)"]
+    SW["Service worker (precache del shell)"]
+  end
+
+  subgraph Supabase
+    Auth["Auth"]
+    DB[("Postgres: rutas, keepalive")]
+    Storage["Storage: fotos-rutas"]
+  end
+
+  Netlify["Netlify (hosting + CI)"]
+  KeepAlive["Función programada de keep-alive\n(planeada, no implementada)"]
+
+  UI --> Cola
+  Cola --> Auth
+  Cola --> DB
+  Cola --> Storage
+  UI -- "lectura pública" --> DB
+  UI -- "fotos vía URL firmada" --> Storage
+  Netlify --> UI
+  KeepAlive -. "ping cada 12h" .-> DB
 ```
 
-## Variables de entorno
+## Modelo de datos y seguridad
 
-Copia `.env.example` a `.env.local` y rellena con los valores de tu proyecto Supabase:
+Tabla `public.rutas` (RLS activado): `id` (uuid, lo genera el cliente para que los reintentos de la cola sean idempotentes), `user_id`, `nombre`, `lat`/`lon`, `distancia_km`, `desnivel_m`, `duracion_min`, `tipo`, `fecha`, `dificultad`, `notas`, `foto_path`, `created_at`.
+
+- **anon** (sin sesión): `GRANT SELECT` solo sobre las columnas públicas (sin `user_id` ni `created_at`, mediante "Column Level Privileges" de Postgres/Supabase) y una política RLS de solo lectura. No tiene `INSERT`/`UPDATE`/`DELETE`.
+- **authenticated** (con sesión): lee la tabla completa, y cuatro políticas separadas — una por operación — limitan `INSERT`/`UPDATE`/`DELETE` a las filas donde `user_id = auth.uid()`.
+- El bucket de Storage `fotos-rutas` es **privado** (`public = false`): nunca listable ni descargable por URL directa. Una política permite a `anon` leer un objeto conocido (vía URL firmada, caducan en 1 hora) sin poder listar el bucket; `authenticated` puede subir/editar/borrar solo dentro de su propia carpeta `{user_id}/`.
+- La `anon key` es pública por diseño (viaja en el bundle del cliente): la seguridad real no depende de ocultarla, sino de las políticas RLS y los GRANT de arriba. En el cliente nunca se usa `service_role`.
+- `index.html` lleva `<meta name="robots" content="noindex, nofollow">` y `public/robots.txt` deniega todo: no es un buscador de rutas públicas pensado para indexarse, solo accesible por enlace directo.
+- Las fotos se recomprimen en el navegador antes de subir (`src/lib/procesarFoto.ts`), lo que también elimina el EXIF/GPS original del archivo final.
+
+### Qué es público
+
+Sin sesión se ve: nombre, coordenadas, distancia, desnivel, duración, tipo, fecha, dificultad, notas y foto de cada ruta. No se ve `user_id` ni `created_at`.
+
+> **Aviso:** no registres rutas que empiecen en un domicilio — las coordenadas del punto de inicio son públicas.
+
+## Offline
+
+`src/composables/useOfflineQueue.ts` es el único punto de entrada para guardar/editar/borrar: todo pasa primero por IndexedDB.
+
+- **Idempotencia:** el `id` de cada ruta lo genera el cliente (`crypto.randomUUID()`), así que un reintento tras un fallo a mitad repite el mismo `upsert`/`delete`, nunca duplica.
+- **Estados de cada elemento de la cola:** `pendiente` (esperando sincronizar), `pendiente_login` (sin sesión usable en el momento de sincronizar), `pendiente_login_otra_cuenta` (hay sesión, pero de una cuenta distinta a la que lo encoló), `error` (falló y se reintentará solo, salvo que sea un error de permisos, que requiere reintento manual).
+- **Sesión caducada sin red:** `supabase-js` conserva la sesión guardada si falla el refresco del token por un error de red, y solo la invalida ante un rechazo explícito del servidor (ver `src/composables/useAuth.ts`). Si de verdad no hay sesión usable al sincronizar, el elemento queda `pendiente_login` en vez de perderse.
+- **Limitaciones:** una sola foto por ruta; sin capa de mapa offline (ver "Limitaciones" más abajo); sin GPX.
+
+## Puesta en marcha
+
+Requisitos: Node 22, una cuenta de Supabase.
+
+1. Crea un proyecto en [supabase.com](https://supabase.com).
+2. En el **SQL Editor**, ejecuta el contenido completo de `supabase/schema.sql`.
+3. En **Authentication → Users**, crea el único usuario editor a mano, con **Auto Confirm User** activado (no hay registro público: el formulario de alta está deshabilitado a propósito).
+4. Copia `.env.example` a `.env.local` y rellena:
+
+   ```
+   VITE_SUPABASE_URL=...
+   VITE_SUPABASE_ANON_KEY=...
+   ```
+
+   `VITE_SUPABASE_URL` es solo el origen del proyecto (`https://TU-PROYECTO.supabase.co`), **sin** `/rest/v1` ni barra final — `src/lib/supabaseUrl.ts` lo valida al arrancar y avisa si se cuela alguna de esas dos cosas.
+
+5. Instala y arranca:
+
+   ```bash
+   npm install
+   npm run dev          # servidor de desarrollo
+   npm run lint         # ESLint
+   npm run typecheck    # vue-tsc
+   npm test             # Vitest
+   npm run build        # build de producción (vue-tsc -b + vite build)
+   npm run generate-pwa-assets  # regenera los iconos de la PWA desde public/favicon.svg
+   ```
+
+## Tests y CI
+
+`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell) y la lógica de "no recargar sola" del aviso de actualización. `.github/workflows/ci.yml` ejecuta lint, `vue-tsc` y los tests en cada push y pull request a `main`.
+
+## Despliegue en Netlify
+
+1. Conecta el repositorio en Netlify (build command `npm run build`, publish directory `dist`, ya configurado en `netlify.toml`).
+2. Variables de entorno, en **Site configuration → Environment variables**:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `SUPABASE_URL` (para cuando exista la función de keep-alive, ver "Hoja de ruta": por ahora no se usa).
+   - `SUPABASE_ANON_KEY` (ídem).
+3. Las funciones programadas de Netlify solo se ejecutan en **deploys publicados** (no en deploy previews ni en local): no hay forma de probarlas antes de desplegar de verdad.
+4. Verificación del keep-alive: **no aplica todavía** — la función no está implementada en este repositorio (ver "Hoja de ruta"); la tabla `public.keepalive` existe en el esquema a la espera de ella.
+
+## Verificación de seguridad tras desplegar
+
+Consultas para ejecutar en el **SQL Editor** de Supabase (no las he podido ejecutar yo: no tengo acceso a tu proyecto). `set local role anon` dentro de una transacción simula una petición sin sesión sin tocar permisos reales.
+
+```sql
+begin;
+set local role anon;
+
+-- Debe funcionar (columnas públicas):
+select id, nombre, lat, lon, distancia_km, desnivel_m, duracion_min,
+       tipo, dificultad, fecha, notas, foto_path
+from public.rutas
+limit 5;
+
+-- Debe fallar (select "*" incluye columnas no concedidas a anon, como user_id):
+select * from public.rutas limit 1;
+
+-- Debe fallar (anon no tiene INSERT/UPDATE/DELETE):
+delete from public.rutas where id = '00000000-0000-0000-0000-000000000000';
+
+rollback;
+```
+
+```sql
+-- Debe devolver false:
+select public from storage.buckets where id = 'fotos-rutas';
+```
+
+Que `anon` no puede **listar** el bucket (solo leer un archivo conocido por su ruta) se comprueba a nivel de API de Storage, no con SQL directo: una petición a `POST {VITE_SUPABASE_URL}/storage/v1/object/list/fotos-rutas` con la `anon key` como `apikey`/`Authorization` debe devolver un error, mientras que descargar una URL firmada generada por la app sí debe funcionar.
+
+## Limitaciones y decisiones
+
+- El plan gratuito de Supabase pausa el proyecto tras 7 días sin actividad suficiente. Mitigación planeada: una función programada de Netlify que haga un ping de bajo coste contra `public.keepalive` cada 12 h (**no implementada todavía** — ver "Hoja de ruta").
+- Sin caché de teselas de mapa offline: las capas (OSM, OpenTopoMap, IGN, PNOA) son de terceros y bajo licencias distintas; cachear sus teselas sin más consideración excede el alcance actual.
+- Una foto de portada por ruta (sin galería).
+- Sin campo de provincia/región.
+- Sin exportación/importación GPX.
+
+## Hoja de ruta
+
+Ideas consideradas y aplazadas explícitamente durante el desarrollo:
+
+- Función programada de keep-alive en Netlify contra `public.keepalive` (la tabla y su RLS ya existen; falta la función).
+- Multiusuario / registro público (el diseño actual es deliberadamente de un único editor con sesión).
+- Caché offline de teselas de mapa.
+- Varias fotos por ruta, exportación/importación GPX, campo de provincia.
+
+## Licencia
+
+Sin decidir todavía — no se declara ninguna licencia en este repositorio por ahora.
+
+## Licencias y atribuciones de terceros
+
+- **IGN (Instituto Geográfico Nacional de España)** — capas "Mapa Topográfico Nacional" y PNOA (ortofoto): `© Instituto Geográfico Nacional de España (IGN)`, PNOA además `· PNOA · CC BY 4.0 scne.es`. Licencia: CC BY 4.0, confirmada en el `AccessConstraints` del `GetCapabilities` oficial de cada servicio y en las [condiciones de licencia de uso del IGN](https://www.ign.es/resources/licencia/Condiciones_licenciaUso_IGN.pdf).
+- **OpenStreetMap** — datos de mapa: `© colaboradores de OpenStreetMap`, [openstreetmap.org/copyright](https://www.openstreetmap.org/copyright).
+- **OpenTopoMap** — estilo de mapa topográfico: datos de OpenStreetMap y [SRTM](https://viewfinderpanoramas.org), estilo `© OpenTopoMap`, licencia [CC-BY-SA](https://creativecommons.org/licenses/by-sa/3.0/).
+- **Leaflet** y **Leaflet.markercluster** — librería de mapa y agrupación de marcadores (licencia BSD-2-Clause).
+- **Supabase**, **Vue 3**, **Vite**, **vite-plugin-pwa**, **idb**, **exifr** — librerías principales del stack (ver `package.json` para versiones exactas).
+
+## Estructura del proyecto
 
 ```
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+├── public/                  # Estáticos servidos tal cual (iconos PWA, favicon, robots.txt)
+├── src/
+│   ├── components/          # Componentes Vue (mapa, barra, formulario, paneles, avisos)
+│   ├── composables/         # Estado compartido tipo singleton (sesión, rutas, cola offline,
+│   │                        # paneles superpuestos, actualización de la PWA, prompt de instalar)
+│   ├── lib/                 # Funciones puras y utilidades (procesado de foto, validación,
+│   │                        # cliente de Supabase, caché de URLs firmadas, orden de rutas)
+│   ├── types/                # Tipos generados/escritos a mano del esquema de Supabase
+│   └── test/                 # Configuración y polyfills compartidos de Vitest
+├── supabase/
+│   ├── schema.sql             # Esquema completo, estado final (ejecutar en un proyecto nuevo)
+│   └── migrations/            # Diffs incrementales (para un proyecto que ya tenía un estado anterior)
+├── pwa-options.ts / pwa-assets.config.ts  # Configuración de la PWA y generación de iconos
+├── netlify.toml              # Redirect SPA, cabeceras de caché y seguridad
+└── .github/workflows/ci.yml  # Lint + typecheck + tests en cada push/PR a main
 ```
-
-## Base de datos (Supabase)
-
-1. Abre el **SQL Editor** de tu proyecto Supabase.
-2. Ejecuta el contenido completo de `supabase/schema.sql` (va en una transacción: si algo falla, no queda nada a medias).
-3. Comprueba que se crearon las tablas `public.rutas` y `public.keepalive`, y el bucket privado `fotos-rutas` con sus políticas.
-
-### Regenerar `src/types/database.types.ts`
-
-Este archivo está escrito a mano (coherente con `supabase/schema.sql`) porque aquí no hay acceso al proyecto Supabase real. Si cambias el esquema, puedes regenerarlo automáticamente con la CLI de Supabase:
-
-```bash
-npx supabase login
-npx supabase gen types typescript --project-id TU_PROJECT_ID > src/types/database.types.ts
-```
-
-## Mapa: capa del IGN (pendiente de verificación visual)
-
-La capa "IGN (Mapa Topográfico Nacional)" usa una URL de teselas WMTS construida a partir de parámetros oficiales confirmados en el `GetCapabilities` del IGN (capa `MTN`, `tilematrixset=GoogleMapsCompatible`, formato `image/jpeg`), pero el IGN no publica una plantilla "lista para usar" en Leaflet. Al probar la app en local, comprueba visualmente que esa capa carga teselas correctamente; si no es así, dímelo.
-
-## Cola offline: `saveRoute()` y `deleteRoute()`
-
-`src/composables/useOfflineQueue.ts` es el único punto de entrada para escribir en Supabase desde la UI:
-
-- `saveRoute()`: guarda una ruta nueva o editada. Escribe primero en IndexedDB y después intenta sincronizar (foto antes que la fila, upsert idempotente por id).
-- `deleteRoute()`: borra una ruta. Pasa por la misma cola: si no hay red, queda pendiente y se reintenta igual que un guardado (borra primero la fila, después la foto del Storage).
-
-El formulario (`RouteFormModal.vue`) y el mapa (`MapView.vue`) llaman siempre a estas funciones; nunca a Supabase directamente.
-
-> El `window.__rutacora` que existió temporalmente para probar la cola antes de tener el formulario ya se ha retirado (era solo para desarrollo, bloque 3).
-
-## Formulario de ruta
-
-Botón "+ Añadir ruta" bajo el mapa, y "Editar"/"Borrar" en el popup de cada ruta. Tres formas de fijar la ubicación (todas rellenan el mismo lat/lon): tocar el mapa, arrastrar el marcador, o el botón "Usar mi ubicación" (si el permiso de geolocalización se deniega, se muestra un aviso y se puede seguir con el mapa o las coordenadas a mano). Validación en cliente (nombre, rango de lat/lon, distancia > 0, fecha obligatoria, dificultad de la lista canónica).
-
-## Fotos
-
-`src/lib/procesarFoto.ts` procesa la foto elegida en el formulario (una sola, opcional, campo `<input type="file" accept="image/*">` sin `capture`, así el navegador ofrece cámara o galería):
-
-1. Valida que sea una imagen y que no supere 40 MB.
-2. Lee el EXIF (GPS y orientación) con `exifr`. El GPS solo se usa para autorrellenar la ubicación si aún no hay una elegida; nunca se sube.
-3. Decodifica, corrige la orientación, redimensiona a máximo 1600px en el lado largo (sin recortar) y recodifica como JPEG vía `canvas` probando calidad 0.8 → 0.6 → 0.4 hasta respetar un techo de 0.5 MB (sin perseguir un peso exacto). El `canvas` nunca conserva EXIF/GPS en la salida.
-
-El Blob resultante va a `saveRoute()` (cola offline) como `{ tipo: 'reemplazar', blob }`, junto con el `foto_path` existente si se está editando, para que la cola decida subir, mantener o borrar la foto al sincronizar — nunca se sube directamente desde la UI.
-
-### Probarlo con una foto real
-
-1. `npm run dev`, entra, pulsa "+ Añadir ruta" y elige una foto real del móvil o del equipo (con GPS si quieres comprobar el autorrelleno).
-2. Comprueba que, si no habías fijado ubicación, el marcador se mueve a la posición de la foto.
-3. Guarda la ruta y abre su popup: la foto debe cargar (vía URL firmada).
-4. Edita esa ruta: deberías ver la foto actual, con botones para cambiarla o quitarla.
-
-### Comprobar que el bucket es privado
-
-En el panel de Supabase → **Storage** → bucket `fotos-rutas`: debe aparecer marcado como **privado** (no público). Si copias la URL pública de un archivo y la abres en una ventana privada sin sesión, debe fallar (403/404), no mostrar la imagen.
-
-### Comprobar que el archivo subido no tiene GPS/EXIF
-
-1. En el panel de Supabase → Storage → `fotos-rutas/{tu_user_id}/{id_de_la_ruta}.jpg`, descarga ese archivo.
-2. Comprueba sus metadatos con cualquier visor de EXIF (en el explorador de archivos de Windows: botón derecho → Propiedades → Detalles; no debería mostrar datos de GPS, y la sección de cámara debería estar vacía o ser mínima comparada con el original).
-3. Alternativa más rigurosa: con Node instalado, `npx exifr gps ruta/al/archivo.jpg` (usando el paquete `exifr` que ya usa el proyecto) debe devolver `undefined`/nada.
-
-## Pendiente de documentar (bloques siguientes)
-
-- Configuración de variables en Netlify y despliegue.
-- Verificación del keep-alive (Netlify Scheduled Function contra `public.keepalive`).
