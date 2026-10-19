@@ -138,7 +138,9 @@ function onSeleccionar(ruta: RutaConEstado): void {
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: 70svh;
+  /* Bottom sheet: como mucho el 70% de la pantalla, pero nunca invade la
+     barra superior aunque el teclado/orientación reduzcan el alto. */
+  max-height: min(70svh, calc(100svh - var(--alto-barra)));
   display: flex;
   flex-direction: column;
   background: var(--color-surface);
@@ -149,7 +151,7 @@ function onSeleccionar(ruta: RutaConEstado): void {
 @media (min-width: 768px) {
   .panel-rutas {
     left: auto;
-    top: 0;
+    top: var(--alto-barra);
     bottom: 0;
     width: 360px;
     max-height: none;

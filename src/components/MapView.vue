@@ -5,7 +5,6 @@ import { useLeafletMap } from '@/composables/useLeafletMap'
 import { useVisibleRoutes, type RutaConEstado } from '@/composables/useVisibleRoutes'
 import { useOfflineQueue, type AccionFoto, type GuardarRutaInput } from '@/composables/useOfflineQueue'
 import { ANCHO_BREAKPOINT_ESCRITORIO_PX, ANCHO_PANEL_RUTAS_PX } from '@/lib/constantes'
-import LoginModal from './LoginModal.vue'
 import RouteFormModal from './RouteFormModal.vue'
 import RouteListPanel from './RouteListPanel.vue'
 import type { Ruta } from '@/types/database.types'
@@ -13,7 +12,7 @@ import type { Ruta } from '@/types/database.types'
 const mapContainer = ref<HTMLElement | null>(null)
 const { rutasVisibles, isLoading, errorMessage, fetchRutas } = useVisibleRoutes()
 const { saveRoute, deleteRoute } = useOfflineQueue()
-const { session, logout } = useAuth()
+const { session } = useAuth()
 
 let leafletMap: ReturnType<typeof useLeafletMap> | null = null
 
@@ -27,7 +26,6 @@ const seleccionLon = ref<number | null>(null)
 const ubicacionElegida = ref(false)
 
 const panelRutasAbierto = ref(false)
-const loginAbierto = ref(false)
 
 function onEditarRuta(ruta: RutaConEstado): void {
   abrirFormulario(ruta)
@@ -121,6 +119,13 @@ function onSeleccionarRutaDeLista(ruta: RutaConEstado): void {
 onUnmounted(() => {
   leafletMap?.destroy()
 })
+
+defineExpose({
+  abrirPanelRutas: () => {
+    panelRutasAbierto.value = true
+  },
+  abrirFormularioNuevo: () => abrirFormulario(null),
+})
 </script>
 
 <template>
@@ -139,49 +144,24 @@ onUnmounted(() => {
       Cargando rutas…
     </div>
 
-    <div class="top-actions">
-      <button
-        type="button"
-        class="boton-secundario"
-        @click="panelRutasAbierto = true"
-      >
-        Rutas
-      </button>
-      <button
-        v-if="session"
-        type="button"
-        class="boton-secundario"
-        @click="logout"
-      >
-        Salir
-      </button>
-      <button
-        v-else
-        type="button"
-        class="boton-secundario"
-        @click="loginAbierto = true"
-      >
-        Iniciar sesión
-      </button>
-    </div>
-
     <div
       ref="mapContainer"
       class="map-container"
     />
 
-    <div
-      v-if="session"
-      class="map-actions"
+    <!-- Botón flotante "Añadir ruta": solo en móvil (<768px, vía CSS) y con
+         sesión; se oculta mientras el panel de rutas está abierto para no
+         quedar tapado por (ni tapar) el bottom sheet. En escritorio, el
+         botón equivalente vive en la barra superior (AppHeader). -->
+    <button
+      v-if="session && !panelRutasAbierto"
+      type="button"
+      class="fab-anadir"
+      aria-label="Añadir ruta"
+      @click="abrirFormulario(null)"
     >
-      <button
-        type="button"
-        class="boton-anadir"
-        @click="abrirFormulario(null)"
-      >
-        + Añadir ruta
-      </button>
-    </div>
+      +
+    </button>
   </div>
 
   <RouteFormModal
@@ -201,11 +181,6 @@ onUnmounted(() => {
     @cerrar="panelRutasAbierto = false"
     @seleccionar="onSeleccionarRutaDeLista"
   />
-
-  <LoginModal
-    v-if="loginAbierto"
-    @cerrar="loginAbierto = false"
-  />
 </template>
 
 <style scoped>
@@ -221,41 +196,6 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
-}
-
-.top-actions {
-  position: absolute;
-  z-index: 1000;
-  top: var(--space-2);
-  right: var(--space-2);
-  display: flex;
-  gap: var(--space-1);
-}
-
-.boton-secundario {
-  min-width: 44px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
-  font-weight: 600;
-  padding: 0 var(--space-2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.map-actions {
-  display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
-}
-
-.boton-anadir {
-  width: 100%;
-  background: var(--color-primary);
-  color: #fff;
-  font-weight: 600;
-  font-size: 16px;
 }
 
 .map-banner {
@@ -274,5 +214,28 @@ onUnmounted(() => {
 .map-banner--error {
   color: var(--color-danger);
   border-color: var(--color-danger);
+}
+
+.fab-anadir {
+  position: absolute;
+  z-index: 1000;
+  right: var(--space-2);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  width: 56px;
+  height: 56px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+@media (min-width: 768px) {
+  .fab-anadir {
+    display: none;
+  }
 }
 </style>

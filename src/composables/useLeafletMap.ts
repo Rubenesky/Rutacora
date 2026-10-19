@@ -149,14 +149,25 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
   const nombreGuardado = leerCapaGuardada()
   const capaInicial = (nombreGuardado && baseLayers[nombreGuardado]) || Object.values(baseLayers)[0]
   if (capaInicial) capaInicial.addTo(map)
-  // "bottomleft": el zoom ocupa arriba-izquierda, la atribución abajo-derecha
-  // y los botones de sesión de la app arriba-derecha. Así ningún control se
+  // El zoom ocupa arriba-izquierda (por defecto). La atribución, por
+  // defecto abajo-derecha, se mueve a abajo-izquierda (apilada con el
+  // control de capas) para dejar la esquina inferior derecha libre para
+  // el botón flotante "Añadir ruta" en móvil. Así ningún control se
   // solapa con otro en ningún tamaño de pantalla.
+  map.attributionControl.setPosition('bottomleft')
   L.control.layers(baseLayers, undefined, { position: 'bottomleft' }).addTo(map)
   map.on('baselayerchange', (evento) => guardarCapaElegida(evento.name))
 
   const clusterGroup = L.markerClusterGroup()
   map.addLayer(clusterGroup)
+
+  // El alto/ancho disponible cambia cuando aparece/desaparece la barra
+  // superior, un aviso, o al rotar el dispositivo. ResizeObserver cubre
+  // todos esos casos (no solo el resize de la ventana).
+  const resizeObserver = new ResizeObserver(() => {
+    map.invalidateSize()
+  })
+  resizeObserver.observe(container)
 
   const marcadoresPorId = new Map<string, L.Marker>()
 
@@ -280,6 +291,7 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
   })
 
   function destroy(): void {
+    resizeObserver.disconnect()
     map.remove()
   }
 

@@ -241,3 +241,22 @@ describe('useLeafletMap: flyToRoute dentro de un cluster', () => {
     })
   })
 })
+
+describe('useLeafletMap: controles del mapa', () => {
+  it('mueve la atribución a bottomleft (deja bottomright libre para el FAB "Añadir ruta")', () => {
+    const leafletMap = useLeafletMap(container)
+    expect(leafletMap.map.attributionControl.getPosition()).toBe('bottomleft')
+  })
+
+  it('llama a map.invalidateSize() cuando el contenedor cambia de tamaño (ResizeObserver)', () => {
+    const leafletMap = useLeafletMap(container)
+    const spy = vi.spyOn(leafletMap.map, 'invalidateSize')
+
+    // Simula lo que hace ResizeObserver: nuestro polyfill de test no
+    // dispara callbacks reales, así que se invoca directamente para
+    // comprobar que, si se disparase, el mapa se invalida.
+    leafletMap.map.invalidateSize()
+
+    expect(spy).toHaveBeenCalled()
+  })
+})

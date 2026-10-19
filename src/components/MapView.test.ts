@@ -33,29 +33,40 @@ beforeEach(() => {
   mockOrder.mockResolvedValue({ data: [], error: null })
 })
 
-describe('MapView: visibilidad de "Añadir ruta" según sesión', () => {
-  it('sin sesión no muestra el botón "+ Añadir ruta"', async () => {
+describe('MapView: botón flotante "Añadir ruta" según sesión', () => {
+  it('sin sesión no muestra el botón flotante "Añadir ruta"', async () => {
     const { session } = useAuth()
     session.value = null
 
     const wrapper = mount(MapView)
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('Añadir ruta')
-    expect(wrapper.text()).toContain('Iniciar sesión')
+    expect(wrapper.find('[aria-label="Añadir ruta"]').exists()).toBe(false)
 
     wrapper.unmount()
   })
 
-  it('con sesión muestra el botón "+ Añadir ruta" y "Salir"', async () => {
+  it('con sesión muestra el botón flotante "Añadir ruta"', async () => {
     const { session } = useAuth()
     session.value = { user: { id: 'user-1' } } as unknown as Session
 
     const wrapper = mount(MapView)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Añadir ruta')
-    expect(wrapper.text()).toContain('Salir')
+    expect(wrapper.find('[aria-label="Añadir ruta"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('expone abrirPanelRutas() y abrirFormularioNuevo() para la barra superior', async () => {
+    const { session } = useAuth()
+    session.value = { user: { id: 'user-1' } } as unknown as Session
+
+    const wrapper = mount(MapView)
+    await flushPromises()
+
+    expect(typeof wrapper.vm.abrirPanelRutas).toBe('function')
+    expect(typeof wrapper.vm.abrirFormularioNuevo).toBe('function')
 
     wrapper.unmount()
   })
