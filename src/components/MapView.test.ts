@@ -24,6 +24,7 @@ vi.mock('@/lib/supabaseClient', () => ({
 
 const MapView = (await import('./MapView.vue')).default
 const { useAuth } = await import('@/composables/useAuth')
+const { cerrarPanel } = (await import('@/composables/usePanelOverlay')).usePanelOverlay()
 
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -53,8 +54,26 @@ describe('MapView: botón flotante "Añadir ruta" según sesión', () => {
     const wrapper = mount(MapView)
     await flushPromises()
 
+    const boton = wrapper.find('[aria-label="Añadir ruta"]')
+    expect(boton.exists()).toBe(true)
+    expect(boton.attributes('title')).toBe('Añadir ruta')
+
+    wrapper.unmount()
+  })
+
+  it('mientras el panel de Rutas está abierto (móvil), el botón flotante se oculta', async () => {
+    const { session } = useAuth()
+    session.value = { user: { id: 'user-1' } } as unknown as Session
+
+    const wrapper = mount(MapView)
+    await flushPromises()
     expect(wrapper.find('[aria-label="Añadir ruta"]').exists()).toBe(true)
 
+    await wrapper.vm.abrirPanelRutas()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[aria-label="Añadir ruta"]').exists()).toBe(false)
+
+    cerrarPanel('rutas')
     wrapper.unmount()
   })
 

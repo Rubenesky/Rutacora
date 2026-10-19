@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { DIFICULTADES } from '@/lib/dificultad'
 import { FOTOS_BUCKET, SIGNED_URL_TTL_SEGUNDOS } from '@/lib/constantes'
 import { ErrorFoto, procesarFoto } from '@/lib/procesarFoto'
 import { hayErrores, validarRuta } from '@/lib/validacionRuta'
 import { supabase } from '@/lib/supabaseClient'
+import { usePanelOverlay } from '@/composables/usePanelOverlay'
 import type { AccionFoto, GuardarRutaInput } from '@/composables/useOfflineQueue'
 import type { Ruta } from '@/types/database.types'
 
@@ -61,6 +62,28 @@ async function cargarPreviewExistente(): Promise<void> {
   if (data) fotoExistentePreviewUrl.value = data.signedUrl
 }
 
+// Snapshot de los campos justo tras cargarlos, para poder detectar más
+// tarde si el usuario ha cambiado algo (y así pedir confirmación antes de
+// cerrar sin guardar, tanto desde los botones como desde Escape/atrás).
+function capturarSnapshot(): string {
+  return JSON.stringify({
+    nombre: nombre.value,
+    distanciaKm: distanciaKm.value,
+    desnivelM: desnivelM.value,
+    duracionMin: duracionMin.value,
+    tipo: tipo.value,
+    fecha: fecha.value,
+    dificultad: dificultad.value,
+    notas: notas.value,
+    lat: props.lat,
+    lon: props.lon,
+    fotoQuitada: fotoQuitada.value,
+    tieneFotoNueva: fotoNuevaBlob.value !== null,
+  })
+}
+
+const snapshotInicial = ref('')
+
 function cargarDesdeInicial(): void {
   const r = props.inicial
   nombre.value = r?.nombre ?? ''
@@ -77,10 +100,26 @@ function cargarDesdeInicial(): void {
   fotoQuitada.value = false
   errorFoto.value = ''
   void cargarPreviewExistente()
+  snapshotInicial.value = capturarSnapshot()
 }
 
 cargarDesdeInicial()
 watch(() => props.inicial, cargarDesdeInicial)
+
+const sucio = computed(() => capturarSnapshot() !== snapshotInicial.value)
+
+function confirmarCierre(): boolean {
+  if (!sucio.value) return true
+  return window.confirm('Tienes cambios sin guardar. ¿Seguro que quieres salir?')
+}
+
+function solicitarCierre(): void {
+  if (confirmarCierre()) emit('cerrar')
+}
+
+const { registrarConfirmacionCierre } = usePanelOverlay()
+onMounted(() => registrarConfirmacionCierre('formulario', confirmarCierre))
+onUnmounted(() => registrarConfirmacionCierre('formulario', null))
 
 onUnmounted(liberarPreviewNueva)
 
@@ -238,7 +277,7 @@ function onGuardar(): void {
           type="button"
           class="modal-cerrar"
           aria-label="Cerrar"
-          @click="emit('cerrar')"
+          @click="solicitarCierre"
         >
           ✕
         </button>
@@ -489,7 +528,7 @@ function onGuardar(): void {
         <button
           type="button"
           class="boton-secundario"
-          @click="emit('cerrar')"
+          @click="solicitarCierre"
         >
           Cancelar
         </button>
@@ -519,7 +558,8 @@ function onGuardar(): void {
 .modal-sheet {
   background: var(--color-surface);
   border-radius: var(--radius) var(--radius) 0 0;
-  max-height: 92svh;
+  max-height: 92vh;
+  max-height: 92dvh;
   display: flex;
   flex-direction: column;
 }

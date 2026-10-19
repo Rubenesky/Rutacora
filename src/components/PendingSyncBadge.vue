@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuth } from '@/composables/useAuth'
 import { useOfflineQueue } from '@/composables/useOfflineQueue'
 
 const { pendientes, retry } = useOfflineQueue()
 const { session } = useAuth()
+
+const expandido = ref(false)
+function alternarExpandido(): void {
+  expandido.value = !expandido.value
+}
 
 // Solo se muestran con detalle los pendientes de la cuenta con sesión
 // activa. Sin sesión no se listan nombres de ruta (podrían ser de otra
@@ -39,13 +44,29 @@ function etiquetaOperacion(item: { tipo: string; ruta: { nombre: string } | null
     class="sync-badge"
     role="status"
   >
-    <p class="sync-badge-title">
-      {{ pendientesPropios.length }} ruta{{ pendientesPropios.length === 1 ? '' : 's' }} pendiente{{
-        pendientesPropios.length === 1 ? '' : 's'
-      }}
-      de sincronizar
-    </p>
-    <ul>
+    <button
+      type="button"
+      class="sync-badge-cabecera"
+      :aria-expanded="expandido"
+      aria-controls="sync-badge-lista"
+      @click="alternarExpandido"
+    >
+      <span class="sync-badge-title">
+        {{ pendientesPropios.length }} ruta{{ pendientesPropios.length === 1 ? '' : 's' }} pendiente{{
+          pendientesPropios.length === 1 ? '' : 's'
+        }}
+        de sincronizar
+      </span>
+      <span
+        class="sync-badge-flecha"
+        aria-hidden="true"
+      >{{ expandido ? '▴' : '▾' }}</span>
+    </button>
+    <ul
+      v-show="expandido"
+      id="sync-badge-lista"
+      class="sync-badge-lista"
+    >
       <li
         v-for="item in pendientesPropios"
         :key="item.id"
@@ -75,22 +96,49 @@ function etiquetaOperacion(item: { tipo: string; ruta: { nombre: string } | null
 .sync-badge {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  padding: var(--space-1) var(--space-2);
   font-size: 14px;
 }
 
-.sync-badge-title {
-  margin: 0 0 var(--space-1);
-  font-weight: 600;
+.sync-badge-cabecera {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border-radius: 0;
+  /* Una sola línea siempre (incluso en pantallas muy bajas, <500px de
+     alto): el texto nunca debe envolver a una segunda línea. */
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.sync-badge ul {
+.sync-badge-title {
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-badge-flecha {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.sync-badge-lista {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 var(--space-2) var(--space-1);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  overflow-y: auto;
+  /* 25% de la altura visible, con 25vh de respaldo para navegadores sin
+     soporte de dvh. */
+  max-height: 25vh;
+  max-height: 25dvh;
 }
 
 .sync-badge li {

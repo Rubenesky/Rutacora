@@ -51,6 +51,7 @@ function onSeleccionar(ruta: RutaConEstado): void {
 <template>
   <div
     v-if="abierto"
+    id="panel-rutas"
     class="panel-rutas"
     role="dialog"
     aria-label="Lista de rutas"
@@ -138,9 +139,12 @@ function onSeleccionar(ruta: RutaConEstado): void {
   left: 0;
   right: 0;
   bottom: 0;
-  /* Bottom sheet: como mucho el 70% de la pantalla, pero nunca invade la
-     barra superior aunque el teclado/orientación reduzcan el alto. */
-  max-height: min(70svh, calc(100svh - var(--alto-barra)));
+  /* Bottom sheet: como mucho el 60% de la pantalla, pero nunca invade la
+     barra superior aunque el teclado/orientación reduzcan el alto. 100vh
+     de respaldo; 100dvh evita que la barra de direcciones de Chrome en
+     Android tape o desplace el panel. */
+  max-height: min(60vh, calc(100vh - var(--alto-barra)));
+  max-height: min(60dvh, calc(100dvh - var(--alto-barra)));
   display: flex;
   flex-direction: column;
   background: var(--color-surface);

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAuth } from '@/composables/useAuth'
 import { useLeafletMap } from '@/composables/useLeafletMap'
+import { usePanelOverlay } from '@/composables/usePanelOverlay'
 import { useVisibleRoutes, type RutaConEstado } from '@/composables/useVisibleRoutes'
 import { useOfflineQueue, type AccionFoto, type GuardarRutaInput } from '@/composables/useOfflineQueue'
 import { ANCHO_BREAKPOINT_ESCRITORIO_PX, ANCHO_PANEL_RUTAS_PX } from '@/lib/constantes'
@@ -13,10 +14,11 @@ const mapContainer = ref<HTMLElement | null>(null)
 const { rutasVisibles, isLoading, errorMessage, fetchRutas } = useVisibleRoutes()
 const { saveRoute, deleteRoute } = useOfflineQueue()
 const { session } = useAuth()
+const { panelActivo, abrirPanel, cerrarPanel } = usePanelOverlay()
 
 let leafletMap: ReturnType<typeof useLeafletMap> | null = null
 
-const formAbierto = ref(false)
+const formAbierto = computed(() => panelActivo.value === 'formulario')
 const formInicial = ref<Ruta | null>(null)
 const seleccionLat = ref<number | null>(null)
 const seleccionLon = ref<number | null>(null)
@@ -25,7 +27,7 @@ const seleccionLon = ref<number | null>(null)
 // Mientras sea false, una foto con GPS en el EXIF puede autorrellenarla.
 const ubicacionElegida = ref(false)
 
-const panelRutasAbierto = ref(false)
+const panelRutasAbierto = computed(() => panelActivo.value === 'rutas')
 
 function onEditarRuta(ruta: RutaConEstado): void {
   abrirFormulario(ruta)
@@ -63,12 +65,13 @@ watch([seleccionLat, seleccionLon], ([lat, lon]) => {
 })
 
 function abrirFormulario(ruta: Ruta | null): void {
+  if (!abrirPanel('formulario')) return // cancelado: otro panel tenía cambios sin guardar
+
   formInicial.value = ruta
   ubicacionElegida.value = ruta !== null
   const centro = leafletMap?.map.getCenter()
   seleccionLat.value = ruta?.lat ?? centro?.lat ?? null
   seleccionLon.value = ruta?.lon ?? centro?.lng ?? null
-  formAbierto.value = true
 
   if (seleccionLat.value !== null && seleccionLon.value !== null) {
     leafletMap?.iniciarSeleccionUbicacion(seleccionLat.value, seleccionLon.value, (lat, lon) => {
@@ -80,7 +83,7 @@ function abrirFormulario(ruta: Ruta | null): void {
 }
 
 function cerrarFormulario(): void {
-  formAbierto.value = false
+  cerrarPanel('formulario')
   formInicial.value = null
   leafletMap?.finalizarSeleccionUbicacion()
 }
@@ -111,7 +114,7 @@ function onSeleccionarRutaDeLista(ruta: RutaConEstado): void {
   if (esEscritorio()) {
     leafletMap?.flyToRoute(ruta, panelRutasAbierto.value ? ANCHO_PANEL_RUTAS_PX : 0)
   } else {
-    panelRutasAbierto.value = false
+    cerrarPanel('rutas')
     leafletMap?.flyToRoute(ruta, 0)
   }
 }
@@ -122,7 +125,7 @@ onUnmounted(() => {
 
 defineExpose({
   abrirPanelRutas: () => {
-    panelRutasAbierto.value = true
+    abrirPanel('rutas')
   },
   abrirFormularioNuevo: () => abrirFormulario(null),
 })
@@ -158,9 +161,14 @@ defineExpose({
       type="button"
       class="fab-anadir"
       aria-label="Añadir ruta"
+      title="Añadir ruta"
       @click="abrirFormulario(null)"
     >
-      +
+      <span aria-hidden="true">+</span>
+      <span
+        aria-hidden="true"
+        class="fab-anadir-texto"
+      >Añadir</span>
     </button>
   </div>
 
@@ -178,7 +186,7 @@ defineExpose({
   <RouteListPanel
     :abierto="panelRutasAbierto"
     :rutas="rutasVisibles"
-    @cerrar="panelRutasAbierto = false"
+    @cerrar="cerrarPanel('rutas')"
     @seleccionar="onSeleccionarRutaDeLista"
   />
 </template>
@@ -230,7 +238,34 @@ defineExpose({
   color: #fff;
   font-size: 28px;
   line-height: 1;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* Anillo blanco de 3px (vía box-shadow, no border, para no afectar el
+     tamaño) + sombra: destaca sobre zonas verdes del mapa (bosques, parques
+     en las capas base). */
+  box-shadow:
+    0 0 0 3px #fff,
+    0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.fab-anadir-texto {
+  display: none;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@media (min-width: 360px) {
+  .fab-anadir {
+    width: auto;
+    padding: 0 22px 0 20px;
+    border-radius: 28px;
+  }
+
+  .fab-anadir-texto {
+    display: inline;
+  }
 }
 
 @media (min-width: 768px) {

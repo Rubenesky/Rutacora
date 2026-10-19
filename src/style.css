@@ -5,6 +5,11 @@
   --color-text-muted: #4b5a4e;
   --color-primary: #2e7d32;
   --color-primary-dark: #1b5e20;
+  /* Verde oscuro de la paleta (igual que --color-primary-dark): más oscuro
+     que el botón flotante y que el chip "activo" de la barra (ambos usan
+     --color-primary, #2e7d32) para que no se confundan entre sí. Contraste
+     con texto blanco: 7.9:1 (AA y AAA para texto normal). */
+  --color-barra: #1b5e20;
   --color-border: #c8cdc5;
   --color-danger: #b3261e;
   --radius: 12px;
@@ -68,6 +73,19 @@ button {
 .leaflet-control-layers label {
   display: block;
   padding: 6px 2px;
+}
+
+/* La atribución (IGN/PNOA son especialmente largas) no tiene por defecto un
+ * ancho máximo: al ser un control absolutamente posicionado con "left" pero
+ * sin "right", el navegador calcula su ancho "preferido" (una sola línea)
+ * en vez de ajustarlo al viewport, así que en pantallas estrechas (320px)
+ * puede desbordar y quedar cortada en el borde. Es un requisito de
+ * licencia (IGN/PNOA) que se vea completa: se fuerza un ancho máximo para
+ * que pueda partirse en 2 líneas en vez de recortarse. */
+.leaflet-control-attribution {
+  max-width: calc(100vw - 20px);
+  white-space: normal;
+  line-height: 1.3;
 }
 
 /* Contenido del popup de Leaflet: se inyecta como HTML plano (sin

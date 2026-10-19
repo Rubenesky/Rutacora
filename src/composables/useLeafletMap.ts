@@ -18,6 +18,15 @@ const ZOOM_INICIAL = 6
 const ZOOM_RUTA = 15
 const DURACION_VUELO_SEGUNDOS = 1.2
 
+// Compara dos uuid como texto, sin distinguir mayúsculas/minúsculas: ambos
+// vienen de Postgres (minúsculas siempre en la práctica), pero la comprobación
+// de propiedad es justo el tipo de sitio donde una diferencia de formato pasa
+// desapercibida en pruebas manuales y falla en producción.
+function mismoUsuario(a: string | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false
+  return a.toLowerCase() === b.toLowerCase()
+}
+
 export interface OpcionesLeafletMap {
   onEditarRuta?: (ruta: RutaConEstado) => void
   onBorrarRuta?: (ruta: RutaConEstado) => void
@@ -188,7 +197,7 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
         // marcadores), así un login/logout posterior no necesita volver a
         // dibujar nada para que aparezcan o desaparezcan estos botones.
         const sesionUserId = opciones.obtenerUserIdSesion?.()
-        const esPropia = Boolean(sesionUserId) && sesionUserId === ruta.user_id
+        const esPropia = mismoUsuario(sesionUserId, ruta.user_id)
         const conAcciones = esPropia && Boolean(opciones.onEditarRuta || opciones.onBorrarRuta)
 
         // setContent() (no appendChild + update()): regenera todo el
