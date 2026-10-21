@@ -28,3 +28,17 @@ jobs:
 
       - name: Tests (Vitest)
         run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Comprobar noindex y ausencia de robots.txt con Disallow
+        run: |
+          grep -q 'name="robots" content="noindex, nofollow"' dist/index.html || {
+            echo "::error::dist/index.html no contiene la meta noindex,nofollow"
+            exit 1
+          }
+          if [ -f dist/robots.txt ] && grep -q 'Disallow: /' dist/robots.txt; then
+            echo "::error::dist/robots.txt no debe contener Disallow: / (bloquearía el rastreo y con él, que los buscadores vean noindex)"
+            exit 1
+          fi

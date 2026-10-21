@@ -80,7 +80,7 @@ Tabla `public.rutas` (RLS activado): `id` (uuid, lo genera el cliente para que l
 - **authenticated** (con sesión): lee la tabla completa, y cuatro políticas separadas — una por operación — limitan `INSERT`/`UPDATE`/`DELETE` a las filas donde `user_id = auth.uid()`.
 - El bucket de Storage `fotos-rutas` es **privado** (`public = false`): nunca listable ni descargable por URL directa. Una política permite a `anon` leer un objeto conocido (vía URL firmada, caducan en 1 hora) sin poder listar el bucket; `authenticated` puede subir/editar/borrar solo dentro de su propia carpeta `{user_id}/`.
 - La `anon key` es pública por diseño (viaja en el bundle del cliente): la seguridad real no depende de ocultarla, sino de las políticas RLS y los GRANT de arriba. En el cliente nunca se usa `service_role`.
-- `index.html` lleva `<meta name="robots" content="noindex, nofollow">` y `public/robots.txt` deniega todo: no es un buscador de rutas públicas pensado para indexarse, solo accesible por enlace directo.
+- Exclusión de buscadores: `index.html` lleva `<meta name="robots" content="noindex, nofollow">` y `netlify.toml` añade la cabecera `X-Robots-Tag: noindex, nofollow` en todas las rutas (doble refuerzo: cualquier buscador que respete una de las dos formas, la respeta). **A propósito no hay `robots.txt` con `Disallow`**: bloquear el rastreo le impediría al buscador llegar a leer esa meta/cabecera, y una URL bloqueada por `robots.txt` puede seguir apareciendo en resultados (sin descripción) si alguien la enlaza desde fuera — lo contrario de lo que se busca. Con el rastreo permitido y `noindex`, el buscador entra, lee la instrucción y no indexa la página. **`noindex` no es control de acceso**: no es un buscador de rutas públicas pensado para indexarse, pero cualquiera con el enlace directo puede abrir la web igualmente; la seguridad real de los datos está en RLS (ver más abajo), no en ocultar la URL.
 - Las fotos se recomprimen en el navegador antes de subir (`src/lib/procesarFoto.ts`), lo que también elimina el EXIF/GPS original del archivo final.
 
 ### Qué es público
@@ -128,7 +128,7 @@ Requisitos: Node 22, una cuenta de Supabase.
 
 ## Tests y CI
 
-`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell), la lógica de "no recargar sola" del aviso de actualización, la función de keep-alive (éxito, 401, error de red, timeout, variables ausentes, normalización de la URL — con `fetch` simulado), la exportación de datos (contenido, solo rutas propias, sin URLs firmadas, botón oculto sin sesión) y que `netlify/functions/` solo contenga funciones desplegables (sin tests, mocks ni `.d.ts`, con nombres de archivo válidos para Netlify — ver `tests/netlify/functionsDirectory.test.ts`; Netlify despliega cada archivo de esa carpeta como una función independiente, así que un archivo de test ahí dentro rompe el despliegue real). `.github/workflows/ci.yml` ejecuta lint, `vue-tsc` y los tests en cada push y pull request a `main`.
+`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell), la lógica de "no recargar sola" del aviso de actualización, la función de keep-alive (éxito, 401, error de red, timeout, variables ausentes, normalización de la URL — con `fetch` simulado), la exportación de datos (contenido, solo rutas propias, sin URLs firmadas, botón oculto sin sesión) y que `netlify/functions/` solo contenga funciones desplegables (sin tests, mocks ni `.d.ts`, con nombres de archivo válidos para Netlify — ver `tests/netlify/functionsDirectory.test.ts`; Netlify despliega cada archivo de esa carpeta como una función independiente, así que un archivo de test ahí dentro rompe el despliegue real). `.github/workflows/ci.yml` ejecuta lint, `vue-tsc`, los tests, el build y una comprobación del resultado del build (que `dist/index.html` lleve la meta `noindex, nofollow` y que `dist/robots.txt`, si existe, no contenga `Disallow: /`) en cada push y pull request a `main`.
 
 ## Despliegue en Netlify
 
@@ -204,7 +204,8 @@ Sin decidir todavía — no se declara ninguna licencia en este repositorio por 
 ## Estructura del proyecto
 
 ```
-├── public/                  # Estáticos servidos tal cual (iconos PWA, favicon, robots.txt)
+├── public/                  # Estáticos servidos tal cual (iconos PWA, favicon; sin robots.txt
+│                            # a propósito, ver "Modelo de datos y seguridad")
 ├── src/
 │   ├── components/          # Componentes Vue (mapa, barra, formulario, paneles, avisos)
 │   ├── composables/         # Estado compartido tipo singleton (sesión, rutas, cola offline,
@@ -225,5 +226,5 @@ Sin decidir todavía — no se declara ninguna licencia en este repositorio por 
 │                                   # siga conteniendo solo funciones desplegables
 ├── pwa-options.ts / pwa-assets.config.ts  # Configuración de la PWA y generación de iconos
 ├── netlify.toml              # Redirect SPA, cabeceras de caché y seguridad
-└── .github/workflows/ci.yml  # Lint + typecheck + tests en cada push/PR a main
+└── .github/workflows/ci.yml  # Lint + typecheck + tests + build + comprobación de noindex/robots.txt
 ```

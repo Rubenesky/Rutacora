@@ -60,3 +60,11 @@
     # no usa getUserMedia, pero se deja explícito en vez de implícito).
     # Todo lo demás, denegado.
     Permissions-Policy = "geolocation=(self), camera=(self)"
+    # Exclusión de buscadores a nivel de cabecera (además de la meta
+    # "noindex, nofollow" en index.html): a propósito NO hay robots.txt con
+    # Disallow. Bloquear el rastreo impediría a los buscadores LEER esta
+    # cabecera/meta, y una URL bloqueada por robots.txt puede seguir
+    # apareciendo indexada (sin descripción) si alguien la enlaza desde
+    # fuera. Con rastreo permitido + noindex, el buscador sí puede entrar,
+    # lee la instrucción y la respeta: no la indexa.
+    X-Robots-Tag = "noindex, nofollow"
