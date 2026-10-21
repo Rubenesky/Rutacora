@@ -98,6 +98,18 @@ button {
 .leaflet-popup-content {
   margin: var(--space-2);
   min-width: 220px;
+  /* Sin esto, una foto más alta que la pantalla (fotos en vertical, sobre
+     todo en móvil) hacía crecer el popup más que el propio mapa; Leaflet
+     intenta encajarlo centrando/paneando (_adjustPan), pero si no cabe
+     entero en la pantalla, la parte de abajo —justo donde está la foto,
+     al final del contenido— queda fuera de la vista. Con un alto máximo y
+     scroll interno, el popup nunca crece más que la pantalla: lo que no
+     cabe se ve haciendo scroll dentro del propio popup, no desapareciendo.
+     70vh de respaldo; 70dvh evita que la barra de direcciones de Chrome
+     en Android lo recorte más de la cuenta. */
+  max-height: 70vh;
+  max-height: 70dvh;
+  overflow-y: auto;
 }
 
 .ruta-popup h3 {
