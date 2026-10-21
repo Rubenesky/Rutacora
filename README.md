@@ -19,6 +19,8 @@ Después de una ruta de senderismo, lo normal es querer apuntar dónde ha sido, 
 - Lista de rutas ordenable (nombre, fecha, distancia), con panel lateral en escritorio y hoja inferior en móvil.
 - Cola de guardado offline: añadir, editar y borrar funcionan sin conexión y se sincronizan solos al recuperarla.
 - PWA instalable, con el shell disponible sin conexión y aviso de actualización que nunca recarga la página sin permiso.
+- Exportar datos: con sesión, descarga un JSON con todas las rutas propias (sin fotos, sin URLs firmadas, sin pendientes de la cola).
+- Keep-alive programado (Netlify Scheduled Function) contra `public.keepalive`, para que el plan gratuito de Supabase no pause el proyecto por inactividad.
 
 ## Capturas
 
@@ -58,7 +60,7 @@ flowchart LR
   end
 
   Netlify["Netlify (hosting + CI)"]
-  KeepAlive["Función programada de keep-alive\n(planeada, no implementada)"]
+  KeepAlive["netlify/functions/keepalive.ts\n(cron cada 12h)"]
 
   UI --> Cola
   Cola --> Auth
@@ -67,7 +69,7 @@ flowchart LR
   UI -- "lectura pública" --> DB
   UI -- "fotos vía URL firmada" --> Storage
   Netlify --> UI
-  KeepAlive -. "ping cada 12h" .-> DB
+  KeepAlive -- "ping" --> DB
 ```
 
 ## Modelo de datos y seguridad
@@ -94,7 +96,7 @@ Sin sesión se ve: nombre, coordenadas, distancia, desnivel, duración, tipo, fe
 - **Idempotencia:** el `id` de cada ruta lo genera el cliente (`crypto.randomUUID()`), así que un reintento tras un fallo a mitad repite el mismo `upsert`/`delete`, nunca duplica.
 - **Estados de cada elemento de la cola:** `pendiente` (esperando sincronizar), `pendiente_login` (sin sesión usable en el momento de sincronizar), `pendiente_login_otra_cuenta` (hay sesión, pero de una cuenta distinta a la que lo encoló), `error` (falló y se reintentará solo, salvo que sea un error de permisos, que requiere reintento manual).
 - **Sesión caducada sin red:** `supabase-js` conserva la sesión guardada si falla el refresco del token por un error de red, y solo la invalida ante un rechazo explícito del servidor (ver `src/composables/useAuth.ts`). Si de verdad no hay sesión usable al sincronizar, el elemento queda `pendiente_login` en vez de perderse.
-- **Limitaciones:** una sola foto por ruta; sin capa de mapa offline (ver "Limitaciones" más abajo); sin GPX.
+- **Limitaciones:** una sola foto por ruta; sin capa de mapa offline (ver "Limitaciones" más abajo); sin GPX; la exportación de datos (JSON, con sesión) tampoco incluye fotos.
 
 ## Puesta en marcha
 
@@ -126,18 +128,19 @@ Requisitos: Node 22, una cuenta de Supabase.
 
 ## Tests y CI
 
-`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell) y la lógica de "no recargar sola" del aviso de actualización. `.github/workflows/ci.yml` ejecuta lint, `vue-tsc` y los tests en cada push y pull request a `main`.
+`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell), la lógica de "no recargar sola" del aviso de actualización, la función de keep-alive (éxito, 401, error de red, timeout, variables ausentes, normalización de la URL — con `fetch` simulado) y la exportación de datos (contenido, solo rutas propias, sin URLs firmadas, botón oculto sin sesión). `.github/workflows/ci.yml` ejecuta lint, `vue-tsc` y los tests en cada push y pull request a `main`.
 
 ## Despliegue en Netlify
 
 1. Conecta el repositorio en Netlify (build command `npm run build`, publish directory `dist`, ya configurado en `netlify.toml`).
 2. Variables de entorno, en **Site configuration → Environment variables**:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-   - `SUPABASE_URL` (para cuando exista la función de keep-alive, ver "Hoja de ruta": por ahora no se usa).
-   - `SUPABASE_ANON_KEY` (ídem).
+   - `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (cliente, con prefijo `VITE_` para que Vite las incluya en el build).
+   - `SUPABASE_URL` y `SUPABASE_ANON_KEY` (sin prefijo: las lee `netlify/functions/keepalive.ts` vía `process.env`, no el build del cliente). Mismos valores que las anteriores, sin `/rest/v1` ni barra final — la función normaliza la URL igualmente, pero no hace falta forzarlo.
 3. Las funciones programadas de Netlify solo se ejecutan en **deploys publicados** (no en deploy previews ni en local): no hay forma de probarlas antes de desplegar de verdad.
-4. Verificación del keep-alive: **no aplica todavía** — la función no está implementada en este repositorio (ver "Hoja de ruta"); la tabla `public.keepalive` existe en el esquema a la espera de ella.
+4. **Verificación del keep-alive tras desplegar:** la función (`netlify/functions/keepalive.ts`) está escrita, probada con `fetch` simulado y pasa el build, pero **no se ha verificado todavía en producción** (no tengo acceso a tu proyecto de Netlify/Supabase). Para comprobarla:
+   - En el panel de Netlify, **Functions → keepalive**, pulsa **Run now** para forzar una ejecución sin esperar a la programación.
+   - Mira sus logs: debe terminar con `keepalive: ok` (200). Si falta alguna variable de entorno o la petición falla, el log lo dice (status HTTP o "timeout"/"error de red"), sin mostrar nunca la clave ni la URL completa.
+   - La función hace un `SELECT` (no modifica `pinged_at`, que sigue siendo el de cuando se ejecutó `schema.sql`). No he podido confirmar de forma oficial que una consulta de lectura cuente como "actividad" a ojos de Supabase para evitar la pausa del plan gratuito; si tras desplegar ves que el proyecto se pausa igualmente, avisa para revisarlo (podría necesitarse un `UPDATE` en vez de un `SELECT`).
 
 ## Verificación de seguridad tras desplegar
 
@@ -171,7 +174,7 @@ Que `anon` no puede **listar** el bucket (solo leer un archivo conocido por su r
 
 ## Limitaciones y decisiones
 
-- El plan gratuito de Supabase pausa el proyecto tras 7 días sin actividad suficiente. Mitigación planeada: una función programada de Netlify que haga un ping de bajo coste contra `public.keepalive` cada 12 h (**no implementada todavía** — ver "Hoja de ruta").
+- El plan gratuito de Supabase pausa el proyecto tras 7 días sin actividad suficiente. Mitigación: `netlify/functions/keepalive.ts`, una función programada (cron cada 12 h) que consulta `public.keepalive` con la clave anon — implementada y probada, pero **sin verificar todavía en producción** (ver "Despliegue en Netlify").
 - Sin caché de teselas de mapa offline: las capas (OSM, OpenTopoMap, IGN, PNOA) son de terceros y bajo licencias distintas; cachear sus teselas sin más consideración excede el alcance actual.
 - Una foto de portada por ruta (sin galería).
 - Sin campo de provincia/región.
@@ -181,10 +184,10 @@ Que `anon` no puede **listar** el bucket (solo leer un archivo conocido por su r
 
 Ideas consideradas y aplazadas explícitamente durante el desarrollo:
 
-- Función programada de keep-alive en Netlify contra `public.keepalive` (la tabla y su RLS ya existen; falta la función).
 - Multiusuario / registro público (el diseño actual es deliberadamente de un único editor con sesión).
 - Caché offline de teselas de mapa.
-- Varias fotos por ruta, exportación/importación GPX, campo de provincia.
+- Varias fotos por ruta, importación GPX (la exportación ya existe, en JSON; ver "Funcionalidades"), campo de provincia.
+- Fotos incluidas en la exportación de datos (hoy se excluyen a propósito).
 
 ## Licencia
 
@@ -213,6 +216,7 @@ Sin decidir todavía — no se declara ninguna licencia en este repositorio por 
 ├── supabase/
 │   ├── schema.sql             # Esquema completo, estado final (ejecutar en un proyecto nuevo)
 │   └── migrations/            # Diffs incrementales (para un proyecto que ya tenía un estado anterior)
+├── netlify/functions/keepalive.ts  # Ping programado (cron) contra public.keepalive
 ├── pwa-options.ts / pwa-assets.config.ts  # Configuración de la PWA y generación de iconos
 ├── netlify.toml              # Redirect SPA, cabeceras de caché y seguridad
 └── .github/workflows/ci.yml  # Lint + typecheck + tests en cada push/PR a main

@@ -2,10 +2,25 @@
 import { computed, ref, watch } from 'vue'
 import { ordenarRutas, type CriterioOrden, type DireccionOrden } from '@/lib/ordenarRutas'
 import { guardarOrdenElegido, leerOrdenGuardado } from '@/lib/preferenciaOrdenRutas'
+import { descargarExportacion } from '@/lib/exportarRutas'
+import { useAuth } from '@/composables/useAuth'
 import { useInstallPrompt } from '@/composables/useInstallPrompt'
+import { useRoutes } from '@/composables/useRoutes'
 import type { RutaConEstado } from '@/composables/useVisibleRoutes'
 
 const { disponible: instalacionDisponible, instalar } = useInstallPrompt()
+const { session } = useAuth()
+// Las rutas "en bruto" (useRoutes), no las visibles fusionadas con la cola
+// (useVisibleRoutes): la exportación no debe incluir rutas pendientes de
+// sincronizar que todavía no son una fila real en el servidor.
+const { rutas: rutasSinFusionar } = useRoutes()
+
+function exportarDatos(): void {
+  const propioUserId = session.value?.user.id
+  if (!propioUserId) return
+  const propias = rutasSinFusionar.value.filter((ruta) => ruta.user_id === propioUserId)
+  descargarExportacion(propias)
+}
 
 const props = defineProps<{
   abierto: boolean
@@ -133,6 +148,22 @@ function onSeleccionar(ruta: RutaConEstado): void {
       </li>
     </ul>
 
+    <div
+      v-if="session"
+      class="panel-exportar"
+    >
+      <button
+        type="button"
+        class="panel-exportar-boton"
+        @click="exportarDatos"
+      >
+        Exportar datos
+      </button>
+      <p class="panel-exportar-aviso">
+        Las fotos no se incluyen en la exportación.
+      </p>
+    </div>
+
     <button
       v-if="instalacionDisponible"
       type="button"
@@ -258,6 +289,27 @@ function onSeleccionar(ruta: RutaConEstado): void {
   font-size: 12px;
   font-weight: 600;
   color: #7a5b00;
+}
+
+.panel-exportar {
+  flex-shrink: 0;
+  margin: var(--space-2) var(--space-2) 0;
+}
+
+.panel-exportar-boton {
+  width: 100%;
+  min-height: 44px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panel-exportar-aviso {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .panel-instalar {

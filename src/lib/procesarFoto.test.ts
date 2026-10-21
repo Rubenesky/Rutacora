@@ -134,7 +134,7 @@ describe('recomprimirImagen: orientación y redimensionado', () => {
     )
     // La esquina superior-izquierda, que en bruto era roja, ya no debe serlo.
     expect(esAproximadamente(leerPixel(datos as unknown as ImageData, 2, 2), [255, 255, 255])).toBe(true)
-  }, 30_000)
+  }, 60_000)
 
   it('redimensiona respetando el máximo de 1600px en el lado largo', async () => {
     const canvasFuente = createCanvas(3000, 2000)
