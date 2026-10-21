@@ -6,6 +6,7 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { createBaseLayers } from './useMapLayers'
 import { FOTOS_BUCKET, SIGNED_URL_TTL_SEGUNDOS } from '@/lib/constantes'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { crearIconoRuta } from '@/lib/iconosRuta'
 import { guardarCapaElegida, leerCapaGuardada } from '@/lib/preferenciaCapaMapa'
 import { guardarUrlCacheada, obtenerUrlCacheada } from '@/lib/signedUrlCache'
 import { supabase } from '@/lib/supabaseClient'
@@ -37,14 +38,9 @@ export interface OpcionesLeafletMap {
   obtenerUserIdSesion?: () => string | undefined
 }
 
-// Marcador distinguible para rutas que aún están pendientes de sincronizar
-// (naranja, en vez del azul por defecto de Leaflet).
-const iconoPendiente = L.divIcon({
-  className: 'marcador-pendiente',
-  html: '<span class="marcador-pendiente-punto"></span>',
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
-})
+// zIndexOffset del marcador con el popup abierto, para que quede por
+// encima de los demás (p. ej. un vecino muy cercano en el mismo cluster).
+const Z_INDEX_POPUP_ABIERTO = 1000
 
 function formatearFecha(fecha: string): string {
   const [anio, mes, dia] = fecha.split('-')
@@ -184,10 +180,19 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     clusterGroup.clearLayers()
     marcadoresPorId.clear()
     for (const ruta of rutas) {
-      const marker = L.marker([ruta.lat, ruta.lon], ruta.pendienteSync ? { icon: iconoPendiente } : undefined)
+      const estado = ruta.pendienteSync ? 'pendiente' : 'sincronizada'
+      const marker = L.marker([ruta.lat, ruta.lon], {
+        icon: crearIconoRuta(estado, ruta.nombre),
+        title: ruta.nombre,
+      })
       // Contenido inicial sin acciones: al abrir el popup se regenera con
       // setContent() ya sabiendo si hay sesión (ver más abajo).
       marker.bindPopup(popupHtml(ruta, false))
+
+      // El marcador con el popup abierto queda por encima de los vecinos
+      // (p. ej. otro muy cercano en el mismo cluster desagrupado).
+      marker.on('popupopen', () => marker.setZIndexOffset(Z_INDEX_POPUP_ABIERTO))
+      marker.on('popupclose', () => marker.setZIndexOffset(0))
 
       // Listener por marcador (no global): así cada popup tiene acceso por
       // closure a su propia "ruta" para las acciones de editar/borrar.
@@ -221,6 +226,18 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
       })
       clusterGroup.addLayer(marker)
       marcadoresPorId.set(ruta.id, marker)
+    }
+  }
+
+  /** Vuelve a la vista inicial (centro de España, zoom de arranque), igual
+   * que al cargar la app por primera vez. Respeta prefers-reduced-motion,
+   * igual que flyToRoute. */
+  function reiniciarVista(): void {
+    const prefiereMovimientoReducido = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (prefiereMovimientoReducido) {
+      map.setView(CENTRO_ESPANA, ZOOM_INICIAL)
+    } else {
+      map.flyTo(CENTRO_ESPANA, ZOOM_INICIAL, { duration: DURACION_VUELO_SEGUNDOS })
     }
   }
 
@@ -277,7 +294,11 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     if (marcadorSeleccion) {
       marcadorSeleccion.setLatLng([lat, lon])
     } else {
-      marcadorSeleccion = L.marker([lat, lon], { draggable: true }).addTo(map)
+      marcadorSeleccion = L.marker([lat, lon], {
+        draggable: true,
+        icon: crearIconoRuta('seleccion'),
+        title: 'Ubicación de la ruta',
+      }).addTo(map)
       marcadorSeleccion.on('dragend', () => {
         const pos = marcadorSeleccion?.getLatLng()
         if (pos) onCambioSeleccion?.(pos.lat, pos.lng)
@@ -312,5 +333,6 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     moverSeleccion,
     finalizarSeleccionUbicacion,
     flyToRoute,
+    reiniciarVista,
   }
 }

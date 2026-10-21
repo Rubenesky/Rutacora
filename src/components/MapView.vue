@@ -128,6 +128,7 @@ defineExpose({
     abrirPanel('rutas')
   },
   abrirFormularioNuevo: () => abrirFormulario(null),
+  reiniciarVista: () => leafletMap?.reiniciarVista(),
 })
 </script>
 
@@ -228,7 +229,10 @@ defineExpose({
   position: absolute;
   z-index: 1000;
   right: var(--space-2);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  /* 64px (no 24px): el plan gratuito de Netlify añade su insignia
+     "Powered by Netlify" fija en la esquina inferior derecha, justo donde
+     quedaba este botón en móvil, y la tapaba. */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
   width: 56px;
   height: 56px;
   min-width: 44px;

@@ -42,3 +42,24 @@ jobs:
             echo "::error::dist/robots.txt no debe contener Disallow: / (bloquearía el rastreo y con él, que los buscadores vean noindex)"
             exit 1
           fi
+
+      - name: Comprobar que no se generan archivos de icono de Leaflet y que el icono propio está en el build
+        run: |
+          # No puede ser "cero apariciones del texto marker-icon/marker-shadow
+          # en dist/": Leaflet mismo incluye esas tres cadenas (marker-icon.png,
+          # marker-icon-2x.png, marker-shadow.png) como valor por defecto,
+          # inerte, de L.Icon.Default.prototype.options — están en el bundle
+          # tanto si se usan como si no, por venir con la librería, no por
+          # nada que haga esta app. Lo que sí se puede comprobar y es
+          # significativo:
+          # 1) que el build nunca GENERA esos archivos como assets reales.
+          if find dist -iname 'marker-icon*.png' -o -iname 'marker-shadow*.png' | grep -q .; then
+            echo "::error::dist/ contiene un archivo marker-icon*.png o marker-shadow*.png real: no debería generarse ninguno"
+            exit 1
+          fi
+          # 2) que el icono propio (SVG en línea, src/lib/iconosRuta.ts) sí
+          # está en el CSS del build.
+          if ! grep -rq 'icono-ruta' dist/assets/*.css; then
+            echo "::error::dist/assets/*.css no contiene las clases .icono-ruta (la fábrica de iconos propia, ver src/lib/iconosRuta.ts) — revisa si el build realmente incluye los estilos de los marcadores"
+            exit 1
+          fi

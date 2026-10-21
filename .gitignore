@@ -20,3 +20,6 @@ Thumbs.db
 
 # vue-tsc build info
 *.tsbuildinfo
+
+# capturas/snapshots de depuración del MCP de Playwright
+.playwright-mcp/

@@ -160,18 +160,58 @@ button {
   font-weight: 600;
 }
 
-/* Marcador distinguible para rutas pendientes de sincronizar. */
-.marcador-pendiente-punto {
-  display: block;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #f59e0b;
-  border: 3px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+/* Marcadores (fábrica única en src/lib/iconosRuta.ts, SVG en línea, nunca
+   L.Icon.Default ni imágenes de archivo: esas no sobreviven al build de
+   Vite, ver el comentario de cabecera de ese archivo). El contenedor mide
+   exactamente lo que diga iconSize (44x56 ahí mismo), que ya cumple el
+   área táctil mínima de 44x44; aquí solo se asegura que el div interior
+   (el que lleva role="img"/aria-label) ocupe todo ese espacio y centre el
+   SVG, y que el puntero indique que es interactivo. */
+.icono-ruta {
+  cursor: pointer;
 }
+
+.icono-ruta > div {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* Sin animaciones propias en ningún estado (no hay @keyframes definidos
+   para .icono-ruta): no hace falta nada adicional aquí para respetar
+   prefers-reduced-motion. */
 
 .ruta-popup-acciones button[data-action='borrar'] {
   color: var(--color-danger);
   border-color: var(--color-danger);
+}
+
+/* Clusters de leaflet.markercluster: paleta propia (verde oscuro de la
+   barra), no los colores por defecto (verde/amarillo/naranja según
+   tamaño) — en particular, nunca el mismo naranja que el pin "pendiente",
+   para no confundirlos. Mismo tono sea cual sea el tamaño del cluster: el
+   círculo interior (donde va el número) es opaco para garantizar el
+   contraste AA del texto blanco sin depender de lo que haya debajo en el
+   mapa; el halo exterior sí es semitransparente, solo decorativo. */
+/* !important: MarkerCluster.Default.css se importa (vía useLeafletMap.ts)
+   después de este archivo en el grafo de módulos, así que sin esto su
+   regla (misma especificidad, misma selector) gana por orden de carga y
+   esta queda sin efecto. */
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large {
+  background-color: rgba(27, 94, 32, 0.45) !important; /* --color-barra */
+}
+
+.marker-cluster-small div,
+.marker-cluster-medium div,
+.marker-cluster-large div {
+  background-color: #1b5e20 !important; /* --color-barra, opaco: 7.9:1 con texto blanco */
+}
+
+.marker-cluster span {
+  color: #fff !important;
+  font-weight: 700;
 }

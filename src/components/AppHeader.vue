@@ -10,6 +10,7 @@ defineProps<{
 const emit = defineEmits<{
   'cerrar-sesion': []
   'anadir-ruta': []
+  'reiniciar-mapa': []
 }>()
 
 const { panelActivo, abrirPanel, cerrarPanel } = usePanelOverlay()
@@ -26,7 +27,12 @@ function onClickRutas(): void {
 
 <template>
   <header class="app-header">
-    <div class="app-header-marca">
+    <button
+      type="button"
+      class="app-header-marca"
+      aria-label="Rutácora — volver a la vista inicial del mapa"
+      @click="emit('reiniciar-mapa')"
+    >
       <svg
         class="app-header-icono"
         viewBox="0 0 24 24"
@@ -39,7 +45,7 @@ function onClickRutas(): void {
         />
       </svg>
       <h1>Rutácora</h1>
-    </div>
+    </button>
 
     <div class="app-header-acciones">
       <button
@@ -105,7 +111,20 @@ function onClickRutas(): void {
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
+  min-height: 44px;
   flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 var(--space-1);
+  margin-left: calc(var(--space-1) * -1);
+  color: inherit;
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+
+.app-header-marca:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .app-header-icono {

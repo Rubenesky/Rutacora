@@ -19,6 +19,7 @@ const mapViewRef = ref<InstanceType<typeof MapView> | null>(null)
       :session="session"
       @cerrar-sesion="logout"
       @anadir-ruta="mapViewRef?.abrirFormularioNuevo()"
+      @reiniciar-mapa="mapViewRef?.reiniciarVista()"
     />
     <UpdateAvailableBanner />
     <PendingSyncBadge />
