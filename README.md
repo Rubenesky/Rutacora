@@ -176,6 +176,23 @@ select public from storage.buckets where id = 'fotos-rutas';
 
 Que `anon` no puede **listar** el bucket (solo leer un archivo conocido por su ruta) se comprueba a nivel de API de Storage, no con SQL directo: una petición a `POST {VITE_SUPABASE_URL}/storage/v1/object/list/fotos-rutas` con la `anon key` como `apikey`/`Authorization` debe devolver un error, mientras que descargar una URL firmada generada por la app sí debe funcionar.
 
+**Regresión: `anon` debe poder generar una URL firmada (`createSignedUrl`).** Esto falló en producción (cualquier visitante sin sesión recibía "No se pudo cargar la foto." siempre, con cualquier ruta) porque la política de `anon` solo cubría las operaciones de descarga autenticada directa (`object.get_authenticated(_info)`), no la de firmado (`object.sign`, la que usa `createSignedUrl`) — ver el comentario junto a esa política en `schema.sql`. La API de Storage simula la operación real mediante el GUC `storage.operation` (ver `storage.operation()` y `storage.allow_any_operation()` en los migrations de `supabase/storage`), así que puede reproducirse sin hacer ninguna petición HTTP real:
+
+```sql
+begin;
+set local role anon;
+set local storage.operation = 'storage.object.sign';
+
+-- Debe devolver true (si devuelve false, la política no incluye 'object.sign'
+-- en su array de storage.allow_any_operation, y createSignedUrl fallará con
+-- un 404 "Object not found" para cualquier visitante sin sesión):
+select storage.allow_any_operation(
+  array['object.get_authenticated_info', 'object.get_authenticated', 'object.sign']
+);
+
+rollback;
+```
+
 ## Limitaciones y decisiones
 
 - El plan gratuito de Supabase pausa el proyecto tras 7 días sin actividad suficiente. Mitigación: `netlify/functions/keepalive.ts`, una función programada (cron cada 12 h) que consulta `public.keepalive` con la clave anon — implementada y probada, pero **sin verificar todavía en producción** (ver "Despliegue en Netlify").

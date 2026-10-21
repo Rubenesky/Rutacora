@@ -174,6 +174,21 @@ on conflict (id) do update set public = false;
 -- listar la carpeta) — ejemplo oficial del bucket "avatars" en la misma
 -- página de la fuente de arriba. Así se pueden generar URLs firmadas de
 -- las fotos de rutas públicas sin exponer el listado completo del bucket.
+--
+-- 'object.sign' es imprescindible: la app genera la URL mediante
+-- supabase.storage.from(...).createSignedUrl(...), que golpea el endpoint
+-- POST /object/sign/..., registrado con la operación 'storage.object.sign'
+-- (ROUTE_OPERATIONS.SIGN_OBJECT_URL en supabase/storage, src/http/routes/
+-- operations.ts). El ejemplo oficial de "avatars" solo cubre
+-- 'object.get_authenticated(_info)', los endpoints de descarga
+-- autenticada directa (GET /object/authenticated/...), no el de firmado.
+-- Sin esta entrada, storage.allow_any_operation() (migrations/tenant/
+-- 0058-operation-ergonomics.sql) nunca encuentra coincidencia para la
+-- operación real, la política deniega el SELECT, y la API de Storage
+-- responde con un 404 "Object not found"/NoSuchKey indistinguible de un
+-- archivo inexistente: así fallaba createSignedUrl para cualquier
+-- visitante sin sesión, siempre, con cualquier foto (confirmado en
+-- producción: toda petición de firma devolvía ese mismo error).
 drop policy if exists "fotos-rutas: lectura pública" on storage.objects;
 create policy "fotos-rutas: lectura pública"
   on storage.objects
@@ -181,7 +196,9 @@ create policy "fotos-rutas: lectura pública"
   to anon
   using (
     bucket_id = 'fotos-rutas'
-    and storage.allow_any_operation(array['object.get_authenticated_info', 'object.get_authenticated'])
+    and storage.allow_any_operation(
+      array['object.get_authenticated_info', 'object.get_authenticated', 'object.sign']
+    )
   );
 
 -- Lectura con sesión: a nivel de bucket (no solo la propia carpeta), para
