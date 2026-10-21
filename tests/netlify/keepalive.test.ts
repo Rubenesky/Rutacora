@@ -39,7 +39,7 @@ describe('keepalive: variables de entorno ausentes', () => {
     const mockFetch = vi.fn()
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const respuesta = await handler()
 
     expect(respuesta.status).toBe(500)
@@ -52,7 +52,7 @@ describe('keepalive: éxito', () => {
     const mockFetch = vi.fn<FetchMock>(() => Promise.resolve(mockRespuestaOk([{ id: 1 }])))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const respuesta = await handler()
 
     expect(respuesta.status).toBe(200)
@@ -69,7 +69,7 @@ describe('keepalive: éxito', () => {
     const mockFetch = vi.fn<FetchMock>(() => Promise.resolve(mockRespuestaOk([{ id: 1 }])))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const respuesta = await handler()
 
     expect(respuesta.status).toBe(200)
@@ -84,7 +84,7 @@ describe('keepalive: éxito', () => {
     const mockFetch = vi.fn<FetchMock>(() => Promise.resolve(mockRespuestaOk([{ id: 1 }])))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     await handler()
 
     const [url] = mockFetch.mock.calls[0]!
@@ -97,7 +97,7 @@ describe('keepalive: respuesta sin filas o con error HTTP', () => {
     const mockFetch = vi.fn(() => Promise.resolve(mockRespuestaOk([])))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const respuesta = await handler()
 
     expect(respuesta.status).not.toBe(200)
@@ -108,7 +108,7 @@ describe('keepalive: respuesta sin filas o con error HTTP', () => {
     const mockFetch = vi.fn(() => Promise.resolve(mockRespuestaError(401)))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const respuesta = await handler()
     const texto = await respuesta.text()
 
@@ -126,7 +126,7 @@ describe('keepalive: error de red y timeout', () => {
     const mockFetch = vi.fn(() => Promise.reject(new Error('fetch failed')))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const respuesta = await handler()
 
     expect(respuesta.status).not.toBe(200)
@@ -147,7 +147,7 @@ describe('keepalive: error de red y timeout', () => {
     )
     vi.stubGlobal('fetch', mockFetch)
 
-    const { default: handler } = await import('./keepalive.ts')
+    const { default: handler } = await import('../../netlify/functions/keepalive.ts')
     const promesaRespuesta = handler()
 
     await vi.advanceTimersByTimeAsync(10_000)

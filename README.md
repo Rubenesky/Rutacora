@@ -128,7 +128,7 @@ Requisitos: Node 22, una cuenta de Supabase.
 
 ## Tests y CI
 
-`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell), la lógica de "no recargar sola" del aviso de actualización, la función de keep-alive (éxito, 401, error de red, timeout, variables ausentes, normalización de la URL — con `fetch` simulado) y la exportación de datos (contenido, solo rutas propias, sin URLs firmadas, botón oculto sin sesión). `.github/workflows/ci.yml` ejecuta lint, `vue-tsc` y los tests en cada push y pull request a `main`.
+`npm test` (Vitest + jsdom + `@vue/test-utils`) cubre, entre otras cosas: la regla de propiedad de rutas (Editar/Borrar solo del dueño, incluida la regresión de la carrera de sesión al arrancar), el interruptor y la mutua exclusión de los paneles superpuestos (Rutas/login/formulario), el historial del gesto "atrás", el contraste de color de la barra, la cola offline (guardar/editar/borrar, reintentos, estados), el procesado de fotos, las reglas de caché del service worker (nunca Supabase, siempre el shell), la lógica de "no recargar sola" del aviso de actualización, la función de keep-alive (éxito, 401, error de red, timeout, variables ausentes, normalización de la URL — con `fetch` simulado), la exportación de datos (contenido, solo rutas propias, sin URLs firmadas, botón oculto sin sesión) y que `netlify/functions/` solo contenga funciones desplegables (sin tests, mocks ni `.d.ts`, con nombres de archivo válidos para Netlify — ver `tests/netlify/functionsDirectory.test.ts`; Netlify despliega cada archivo de esa carpeta como una función independiente, así que un archivo de test ahí dentro rompe el despliegue real). `.github/workflows/ci.yml` ejecuta lint, `vue-tsc` y los tests en cada push y pull request a `main`.
 
 ## Despliegue en Netlify
 
@@ -216,7 +216,13 @@ Sin decidir todavía — no se declara ninguna licencia en este repositorio por 
 ├── supabase/
 │   ├── schema.sql             # Esquema completo, estado final (ejecutar en un proyecto nuevo)
 │   └── migrations/            # Diffs incrementales (para un proyecto que ya tenía un estado anterior)
-├── netlify/functions/keepalive.ts  # Ping programado (cron) contra public.keepalive
+├── netlify/functions/keepalive.ts  # Ping programado (cron) contra public.keepalive — SOLO
+│                                   # la función: Netlify despliega cada archivo de esta
+│                                   # carpeta como una función independiente, así que sus
+│                                   # tests viven aparte, en tests/netlify/
+├── tests/netlify/                  # Tests de las funciones de Netlify (fuera de netlify/functions/
+│                                   # a propósito) y el test que vigila que esa carpeta
+│                                   # siga conteniendo solo funciones desplegables
 ├── pwa-options.ts / pwa-assets.config.ts  # Configuración de la PWA y generación de iconos
 ├── netlify.toml              # Redirect SPA, cabeceras de caché y seguridad
 └── .github/workflows/ci.yml  # Lint + typecheck + tests en cada push/PR a main

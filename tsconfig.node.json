@@ -23,6 +23,7 @@
     "vite.config.ts",
     "pwa-options.ts",
     "vite.config.test.ts",
-    "netlify/functions/**/*.ts"
+    "netlify/functions/**/*.ts",
+    "tests/**/*.ts"
   ]
 }
