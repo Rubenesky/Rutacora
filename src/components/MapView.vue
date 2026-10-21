@@ -229,10 +229,11 @@ defineExpose({
   position: absolute;
   z-index: 1000;
   right: var(--space-2);
-  /* 64px (no 24px): el plan gratuito de Netlify añade su insignia
-     "Powered by Netlify" fija en la esquina inferior derecha, justo donde
-     quedaba este botón en móvil, y la tapaba. */
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+  /* 24px de margen base + --offset-insignia-netlify (40px): el plan
+     gratuito de Netlify añade su insignia "Powered by Netlify" fija en la
+     esquina inferior derecha, justo donde quedaba este botón en móvil, y
+     lo tapaba (ver README, "Limitaciones y decisiones"). */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px + var(--offset-insignia-netlify));
   width: 56px;
   height: 56px;
   min-width: 44px;

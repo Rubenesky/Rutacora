@@ -65,6 +65,20 @@ function cerrarPanel(id: PanelId, opciones: { porPopstate?: boolean } = {}): voi
   }
 }
 
+/** Cierra el panel activo (el que sea), con la misma confirmación que el
+ * resto de vías de cierre si tiene cambios sin guardar. Úsalo para
+ * cualquier acción que deba "limpiar" los paneles abiertos (p. ej. el
+ * botón de inicio de la barra) sin duplicar la comprobación del
+ * confirmador en cada sitio. Devuelve false si el usuario canceló. */
+function cerrarPanelActivoConConfirmacion(): boolean {
+  const activo = panelActivo.value
+  if (!activo) return true
+  const confirmar = confirmadores.get(activo)
+  if (confirmar && !confirmar()) return false
+  cerrarPanel(activo)
+  return true
+}
+
 let inicializado = false
 function init(): void {
   if (inicializado) return
@@ -87,15 +101,17 @@ function init(): void {
   // que el botón de cerrar si hay cambios sin guardar.
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return
-    const activo = panelActivo.value
-    if (!activo) return
-    const confirmar = confirmadores.get(activo)
-    if (confirmar && !confirmar()) return
-    cerrarPanel(activo)
+    cerrarPanelActivoConConfirmacion()
   })
 }
 init()
 
 export function usePanelOverlay() {
-  return { panelActivo, abrirPanel, cerrarPanel, registrarConfirmacionCierre }
+  return {
+    panelActivo,
+    abrirPanel,
+    cerrarPanel,
+    registrarConfirmacionCierre,
+    cerrarPanelActivoConConfirmacion,
+  }
 }

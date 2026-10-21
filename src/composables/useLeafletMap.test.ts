@@ -219,6 +219,22 @@ describe('useLeafletMap: flyToRoute', () => {
     expect(destino.lat).toBeCloseTo(40, 5)
     expect(destino.lng).toBeCloseTo(-3.7, 5)
   })
+
+  it('reiniciarVista() no altera flyToRoute: sigue volando a la ruta correcta después de reiniciar', () => {
+    mockMatchMedia(true)
+    const leafletMap = useLeafletMap(container)
+    const ruta = crearRuta({ lat: 40, lon: -3.7 })
+    leafletMap.renderRutas([ruta])
+
+    leafletMap.reiniciarVista()
+
+    const spySetView = vi.spyOn(leafletMap.map, 'setView')
+    leafletMap.flyToRoute(ruta, 0)
+
+    const destino = spySetView.mock.calls[0]?.[0] as L.LatLng
+    expect(destino.lat).toBeCloseTo(40, 5)
+    expect(destino.lng).toBeCloseTo(-3.7, 5)
+  })
 })
 
 describe('useLeafletMap: flyToRoute dentro de un cluster', () => {

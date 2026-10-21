@@ -97,3 +97,11 @@ export function crearIconoRuta(estado: EstadoIconoRuta, nombre?: string): L.DivI
     popupAnchor: [0, -(ALTO - 2 - CENTRO_CABEZA_Y) - 8],
   })
 }
+
+// Red de seguridad: si en el futuro alguien crea un L.marker(...) sin
+// pasarle un icono explícito (como pasaba antes de este arreglo), que caiga
+// en el pin propio en vez de en L.Icon.Default — cuyos PNG no sobreviven al
+// build de Vite (ver el comentario de cabecera de este archivo). Todo el
+// código de la app ya pasa siempre un icono explícito; esto es solo un
+// último recurso para que un despiste futuro no reproduzca el icono roto.
+L.Marker.prototype.options.icon = crearIconoRuta('sincronizada')

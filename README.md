@@ -183,6 +183,7 @@ Que `anon` no puede **listar** el bucket (solo leer un archivo conocido por su r
 - Una foto de portada por ruta (sin galería).
 - Sin campo de provincia/región.
 - Sin exportación/importación GPX.
+- El botón flotante "Añadir ruta" lleva un desplazamiento extra en móvil (`--offset-insignia-netlify`, 40px, en `src/style.css`) para no quedar bajo la insignia "Powered by Netlify" que el plan gratuito añade, fija en la esquina inferior derecha de la página. Según la documentación oficial de Netlify, la insignia se inyecta en el servidor de borde (edge) en cada petición, directamente en la respuesta HTML — no es un elemento añadido por el navegador ni depende del build. **No he podido confirmar si también aparece en la app instalada** (modo `standalone`): la documentación no menciona PWA, `display-mode` ni service workers en ningún momento, y esta app además precachea `index.html` (ver "Offline"), así que lo que vea una instalación ya abierta antes podría quedarse con el HTML cacheado en el momento de la instalación en vez de pedir uno nuevo al servidor hasta que se pulse "Actualizar". Habría que comprobarlo con una instalación real.
 
 ## Hoja de ruta
 

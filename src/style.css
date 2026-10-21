@@ -18,6 +18,11 @@
   --space-2: 16px;
   --space-3: 24px;
   --alto-barra: calc(48px + env(safe-area-inset-top, 0px));
+  /* Desplazamiento extra del botón flotante "Añadir ruta" en móvil, para
+     no quedar bajo la insignia "Powered by Netlify" del plan gratuito
+     (fija en la esquina inferior derecha). Ver MapView.vue (.fab-anadir)
+     y el README ("Limitaciones y decisiones") para el porqué exacto. */
+  --offset-insignia-netlify: 40px;
   color-scheme: light;
 }
 

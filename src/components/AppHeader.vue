@@ -13,7 +13,7 @@ const emit = defineEmits<{
   'reiniciar-mapa': []
 }>()
 
-const { panelActivo, abrirPanel, cerrarPanel } = usePanelOverlay()
+const { panelActivo, abrirPanel, cerrarPanel, cerrarPanelActivoConConfirmacion } = usePanelOverlay()
 const rutasAbierto = computed(() => panelActivo.value === 'rutas')
 
 function onClickRutas(): void {
@@ -23,6 +23,16 @@ function onClickRutas(): void {
     abrirPanel('rutas')
   }
 }
+
+function onClickMarca(): void {
+  // Cierra cualquier panel abierto (con la misma confirmación que Escape
+  // si el formulario tiene cambios sin guardar) antes de reiniciar la
+  // vista del mapa; si el usuario cancela, no se hace ninguna de las dos
+  // cosas, igual que al pulsar Escape.
+  if (cerrarPanelActivoConConfirmacion()) {
+    emit('reiniciar-mapa')
+  }
+}
 </script>
 
 <template>
@@ -30,8 +40,8 @@ function onClickRutas(): void {
     <button
       type="button"
       class="app-header-marca"
-      aria-label="Rutácora — volver a la vista inicial del mapa"
-      @click="emit('reiniciar-mapa')"
+      aria-label="Rutácora, volver a la vista inicial"
+      @click="onClickMarca"
     >
       <svg
         class="app-header-icono"

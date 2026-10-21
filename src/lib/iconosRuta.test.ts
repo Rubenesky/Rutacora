@@ -1,3 +1,4 @@
+import L from 'leaflet'
 import { describe, expect, it } from 'vitest'
 import { crearIconoRuta, svgIconoRuta } from './iconosRuta'
 
@@ -78,5 +79,13 @@ describe('iconosRuta: una sola fábrica, SVG en línea, sin L.Icon.Default', () 
     const icono = crearIconoRuta('sincronizada')
     const [, popupY] = icono.options.popupAnchor as [number, number]
     expect(popupY).toBeLessThan(0)
+  })
+
+  it('red de seguridad: un L.marker sin icono explícito usa el icono de la fábrica, nunca L.Icon.Default', () => {
+    const marker = L.marker([40, -3.7])
+    expect(marker.options.icon).toBe(L.Marker.prototype.options.icon)
+    expect(marker.options.icon).toBeInstanceOf(L.DivIcon)
+    const icono = marker.options.icon as L.DivIcon
+    expect(icono.options.html).toContain(svgIconoRuta('sincronizada'))
   })
 })
