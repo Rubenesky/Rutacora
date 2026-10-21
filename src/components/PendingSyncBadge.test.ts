@@ -1,10 +1,24 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { Session } from '@supabase/supabase-js'
 import type { ColaItem } from '@/lib/offlineDb'
 import PendingSyncBadge from './PendingSyncBadge.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useOfflineQueue } from '@/composables/useOfflineQueue'
+
+// Sin este mock, este archivo depende de que VITE_SUPABASE_URL/ANON_KEY
+// existan de verdad (src/lib/supabaseClient.ts lanza si faltan) — pasaba en
+// local solo porque había un .env.local con valores reales, y fallaba en
+// CI (sin ese archivo). useAuth/useOfflineQueue importan ese cliente de
+// forma transitiva vía PendingSyncBadge.vue.
+vi.mock('@/lib/supabaseClient', () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn(() => Promise.resolve({ data: { session: null }, error: null })),
+      onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+    },
+  },
+}))
 
 const USER_ID = 'user-1'
 
