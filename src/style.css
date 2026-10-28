@@ -80,6 +80,30 @@ button {
   padding: 6px 2px;
 }
 
+/* Opciones del selector de capas: alto mínimo de 44px (con solo el padding
+   de arriba medían ~30px). Selector más específico (0,2,1) que el de
+   leaflet.css (".leaflet-control-layers label", 0,1,1) a propósito: ese
+   archivo se carga después que este (vía useLeafletMap.ts) y fija
+   "display: block" con la misma especificidad, que anularía el flex que
+   centra verticalmente el radio y el texto. Sin !important: basta con
+   ganar por especificidad. */
+.leaflet-control-layers .leaflet-control-layers-list label {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* Botón de cerrar (x) del popup: Leaflet lo deja en 24x24px. Se lleva a
+   44x44 como el resto de controles. Su regla por defecto es
+   ".leaflet-container a.leaflet-popup-close-button" (0,2,1) y leaflet.css
+   se carga después de este archivo, así que aquí se usa un selector más
+   específico (0,3,1) en vez de !important. */
+.leaflet-container .leaflet-popup a.leaflet-popup-close-button {
+  width: 44px;
+  height: 44px;
+  font: 20px/44px Tahoma, Verdana, sans-serif;
+}
+
 /* La atribución (IGN/PNOA son especialmente largas) no tiene por defecto un
  * ancho máximo: al ser un control absolutamente posicionado con "left" pero
  * sin "right", el navegador calcula su ancho "preferido" (una sola línea)
@@ -115,6 +139,10 @@ button {
 .ruta-popup h3 {
   margin: 0 0 var(--space-1);
   font-size: 18px;
+  /* El botón de cerrar (44px, esquina superior derecha) invade 28px del
+     contenido (44px - 16px de margen de .leaflet-popup-content): se
+     reserva ese hueco para que un nombre largo no quede tapado por la x. */
+  padding-right: 28px;
 }
 
 .ruta-popup dl {
@@ -231,4 +259,38 @@ button {
 .marker-cluster span {
   color: #fff !important;
   font-weight: 700;
+}
+
+/* Tamaño de los clusters: leaflet.markercluster los crea de 40x40px
+   (iconSize en su iconCreateFunction por defecto), por debajo del área
+   táctil mínima de 44x44. Se agrandan aquí a 44x44 manteniendo el círculo
+   centrado sobre el punto.
+   !important en el contenedor: Leaflet escribe width/height/margin-left/
+   margin-top como estilos en línea (DivIcon._setIconStyles, margin =
+   -iconSize/2 = -20px), que solo se pueden superar con !important; el
+   margen pasa a -22px para que siga centrado. border-radius e interior:
+   mismo motivo de orden de carga que los colores de arriba
+   (MarkerCluster.Default.css va después, misma especificidad). */
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large {
+  width: 44px !important;
+  height: 44px !important;
+  margin-left: -22px !important;
+  margin-top: -22px !important;
+  border-radius: 22px !important;
+}
+
+.marker-cluster-small div,
+.marker-cluster-medium div,
+.marker-cluster-large div {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 17px !important;
+}
+
+.marker-cluster-small span,
+.marker-cluster-medium span,
+.marker-cluster-large span {
+  line-height: 34px !important;
 }

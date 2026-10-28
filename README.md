@@ -4,7 +4,7 @@ Rutas de senderismo en un mapa interactivo de España: un único editor con sesi
 
 [![CI](https://github.com/Rubenesky/Rutacora/actions/workflows/ci.yml/badge.svg)](https://github.com/Rubenesky/Rutacora/actions/workflows/ci.yml)
 
-**Demo:** <!-- TODO: URL de Netlify tras el despliegue -->
+**Demo:** https://rutacora.netlify.app
 
 ## Qué es y por qué
 
@@ -25,7 +25,7 @@ Después de una ruta de senderismo, lo normal es querer apuntar dónde ha sido, 
 
 ## Capturas
 
-_(Carpeta `docs/img/`, con datos de ejemplo — ver la lista de capturas pendientes en la respuesta donde se entregó este README.)_
+_No se han añadido capturas todavía: la carpeta `docs/img/` aún no contiene las imágenes que enlaza la tabla de abajo, así que esos enlaces se verán rotos hasta que se añadan (previstas con datos de ejemplo)._
 
 | | |
 |---|---|
@@ -98,6 +98,8 @@ Sin sesión se ve: nombre, coordenadas, distancia, desnivel, duración, tipo, fe
 - **Idempotencia:** el `id` de cada ruta lo genera el cliente (`crypto.randomUUID()`), así que un reintento tras un fallo a mitad repite el mismo `upsert`/`delete`, nunca duplica.
 - **Estados de cada elemento de la cola:** `pendiente` (esperando sincronizar), `pendiente_login` (sin sesión usable en el momento de sincronizar), `pendiente_login_otra_cuenta` (hay sesión, pero de una cuenta distinta a la que lo encoló), `error` (falló y se reintentará solo, salvo que sea un error de permisos, que requiere reintento manual).
 - **Sesión caducada sin red:** `supabase-js` conserva la sesión guardada si falla el refresco del token por un error de red, y solo la invalida ante un rechazo explícito del servidor (ver `src/composables/useAuth.ts`). Si de verdad no hay sesión usable al sincronizar, el elemento queda `pendiente_login` en vez de perderse.
+- **Sin coordinación entre pestañas:** la cola no comparte estado entre pestañas. Si el mismo usuario edita la misma ruta en dos pestañas a la vez, ambas sincronizan en paralelo sin mutex compartido, gana el último `upsert` y no se avisa de ningún conflicto.
+- **Disparador automático solo por `online`:** la sincronización automática depende únicamente del evento `online` del navegador, que no siempre se dispara de forma fiable (portales cautivos, algunos navegadores móviles). No hay reintento periódico de respaldo: si ese evento no llega, el cambio queda pendiente en el dispositivo hasta recargar la app o pulsar "Reintentar" a mano.
 - **Limitaciones:** una sola foto por ruta; sin capa de mapa offline (ver "Limitaciones" más abajo); sin GPX; la exportación de datos (JSON, con sesión) tampoco incluye fotos.
 
 ## Puesta en marcha

@@ -170,10 +170,9 @@ describe('useVisibleRoutes', () => {
 
     mockOrder.mockResolvedValueOnce({ data: null, error: { message: 'Failed to fetch' } })
 
-    const { rutasVisibles, errorMessage, mostrandoCache, fetchRutas } = useVisibleRoutes()
+    const { rutasVisibles, errorMessage, fetchRutas } = useVisibleRoutes()
     await fetchRutas()
 
-    expect(mostrandoCache.value).toBe(true)
     expect(errorMessage.value).toBe('Mostrando datos guardados, sin conexión.')
     expect(rutasVisibles.value).toHaveLength(1)
     expect(rutasVisibles.value[0]?.id).toBe('ruta-servidor-1')

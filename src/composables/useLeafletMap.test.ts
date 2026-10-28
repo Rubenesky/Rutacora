@@ -258,6 +258,56 @@ describe('useLeafletMap: flyToRoute dentro de un cluster', () => {
   })
 })
 
+describe('useLeafletMap: accesibilidad del popup (hallazgo crítico de la auditoría: no se anunciaba, el foco no entraba, Escape no lo cerraba)', () => {
+  it('al abrirse, es un role="dialog" con aria-labelledby apuntando al título, y el foco se mueve al título', () => {
+    mockMatchMedia(true)
+    const leafletMap = useLeafletMap(container)
+    const ruta = crearRuta()
+    leafletMap.renderRutas([ruta])
+    leafletMap.flyToRoute(ruta)
+
+    const rutaPopupEl = container.querySelector<HTMLElement>('.ruta-popup')
+    const titulo = rutaPopupEl?.querySelector<HTMLElement>('h3')
+    expect(rutaPopupEl?.getAttribute('role')).toBe('dialog')
+    expect(rutaPopupEl?.getAttribute('aria-labelledby')).toBe(titulo?.id)
+    expect(titulo?.id).toBeTruthy()
+    expect(document.activeElement).toBe(titulo)
+  })
+
+  it('Escape dentro del popup lo cierra', () => {
+    mockMatchMedia(true)
+    const leafletMap = useLeafletMap(container)
+    const ruta = crearRuta()
+    leafletMap.renderRutas([ruta])
+    leafletMap.flyToRoute(ruta)
+
+    expect(container.querySelector('.ruta-popup')).not.toBeNull()
+
+    const rutaPopupEl = container.querySelector<HTMLElement>('.ruta-popup')
+    rutaPopupEl?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+
+    expect(container.querySelector('.ruta-popup')).toBeNull()
+  })
+
+  it('al cerrarse (por Escape), el foco vuelve al marcador', () => {
+    mockMatchMedia(true)
+    const leafletMap = useLeafletMap(container)
+    const ruta = crearRuta()
+    leafletMap.renderRutas([ruta])
+    leafletMap.flyToRoute(ruta)
+
+    const rutaPopupEl = container.querySelector<HTMLElement>('.ruta-popup')
+    rutaPopupEl?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
+
+    const elementoMarcador = container.querySelector('.icono-ruta')
+    expect(document.activeElement).toBe(elementoMarcador)
+  })
+})
+
 describe('useLeafletMap: controles del mapa', () => {
   it('mueve la atribución a bottomleft (deja bottomright libre para el FAB "Añadir ruta")', () => {
     const leafletMap = useLeafletMap(container)

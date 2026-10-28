@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { ordenarRutas, type CriterioOrden, type DireccionOrden } from '@/lib/ordenarRutas'
 import { guardarOrdenElegido, leerOrdenGuardado } from '@/lib/preferenciaOrdenRutas'
 import { descargarExportacion } from '@/lib/exportarRutas'
+import { mismoUsuario } from '@/lib/mismoUsuario'
+import { formatearFecha } from '@/lib/rutaPopup'
 import { useAuth } from '@/composables/useAuth'
 import { useInstallPrompt } from '@/composables/useInstallPrompt'
 import { useRoutes } from '@/composables/useRoutes'
@@ -18,7 +20,7 @@ const { rutas: rutasSinFusionar } = useRoutes()
 function exportarDatos(): void {
   const propioUserId = session.value?.user.id
   if (!propioUserId) return
-  const propias = rutasSinFusionar.value.filter((ruta) => ruta.user_id === propioUserId)
+  const propias = rutasSinFusionar.value.filter((ruta) => mismoUsuario(ruta.user_id, propioUserId))
   descargarExportacion(propias)
 }
 
@@ -53,12 +55,6 @@ function elegirCriterio(nuevo: CriterioOrden): void {
 function flechaPara(valor: CriterioOrden): string {
   if (criterio.value !== valor) return ''
   return direccion.value === 'asc' ? '↑' : '↓'
-}
-
-function formatearFecha(fecha: string): string {
-  const [anio, mes, dia] = fecha.split('-')
-  if (!anio || !mes || !dia) return fecha
-  return `${dia}/${mes}/${anio}`
 }
 
 function onSeleccionar(ruta: RutaConEstado): void {

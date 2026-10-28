@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { DIFICULTADES } from '@/lib/dificultad'
-import { FOTOS_BUCKET, SIGNED_URL_TTL_SEGUNDOS } from '@/lib/constantes'
+import { obtenerUrlFoto } from '@/lib/obtenerUrlFoto'
 import { ErrorFoto, procesarFoto } from '@/lib/procesarFoto'
 import { hayErrores, validarRuta } from '@/lib/validacionRuta'
-import { supabase } from '@/lib/supabaseClient'
 import { usePanelOverlay } from '@/composables/usePanelOverlay'
 import type { AccionFoto, GuardarRutaInput } from '@/composables/useOfflineQueue'
 import type { Ruta } from '@/types/database.types'
@@ -56,10 +55,7 @@ function liberarPreviewNueva(): void {
 async function cargarPreviewExistente(): Promise<void> {
   fotoExistentePreviewUrl.value = null
   if (!fotoPathExistente.value) return
-  const { data } = await supabase.storage
-    .from(FOTOS_BUCKET)
-    .createSignedUrl(fotoPathExistente.value, SIGNED_URL_TTL_SEGUNDOS)
-  if (data) fotoExistentePreviewUrl.value = data.signedUrl
+  fotoExistentePreviewUrl.value = await obtenerUrlFoto(fotoPathExistente.value)
 }
 
 // Snapshot de los campos justo tras cargarlos, para poder detectar más

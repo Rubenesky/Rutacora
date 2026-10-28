@@ -4,12 +4,11 @@ import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { createBaseLayers } from './useMapLayers'
-import { FOTOS_BUCKET, SIGNED_URL_TTL_SEGUNDOS } from '@/lib/constantes'
-import { escapeHtml } from '@/lib/escapeHtml'
 import { crearIconoRuta } from '@/lib/iconosRuta'
+import { mismoUsuario } from '@/lib/mismoUsuario'
 import { guardarCapaElegida, leerCapaGuardada } from '@/lib/preferenciaCapaMapa'
-import { guardarUrlCacheada, obtenerUrlCacheada } from '@/lib/signedUrlCache'
-import { supabase } from '@/lib/supabaseClient'
+import { prefiereMovimientoReducido } from '@/lib/prefiereMovimientoReducido'
+import { aplicarAccesibilidadPopup, cargarFotoEnPopup, popupHtml } from '@/lib/rutaPopup'
 import type { RutaConEstado } from './useVisibleRoutes'
 
 // Vista inicial centrada en la península, con Baleares y Canarias accesibles
@@ -18,15 +17,6 @@ const CENTRO_ESPANA: L.LatLngTuple = [40.0, -3.7]
 const ZOOM_INICIAL = 6
 const ZOOM_RUTA = 15
 const DURACION_VUELO_SEGUNDOS = 1.2
-
-// Compara dos uuid como texto, sin distinguir mayúsculas/minúsculas: ambos
-// vienen de Postgres (minúsculas siempre en la práctica), pero la comprobación
-// de propiedad es justo el tipo de sitio donde una diferencia de formato pasa
-// desapercibida en pruebas manuales y falla en producción.
-function mismoUsuario(a: string | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false
-  return a.toLowerCase() === b.toLowerCase()
-}
 
 export interface OpcionesLeafletMap {
   onEditarRuta?: (ruta: RutaConEstado) => void
@@ -41,106 +31,6 @@ export interface OpcionesLeafletMap {
 // zIndexOffset del marcador con el popup abierto, para que quede por
 // encima de los demás (p. ej. un vecino muy cercano en el mismo cluster).
 const Z_INDEX_POPUP_ABIERTO = 1000
-
-function formatearFecha(fecha: string): string {
-  const [anio, mes, dia] = fecha.split('-')
-  if (!anio || !mes || !dia) return fecha
-  return `${dia}/${mes}/${anio}`
-}
-
-function popupHtml(ruta: RutaConEstado, conAcciones: boolean): string {
-  const tipo = ruta.tipo === 'circular' ? 'Circular' : ruta.tipo === 'lineal' ? 'Lineal' : '—'
-  const desnivel = ruta.desnivel_m != null ? `${ruta.desnivel_m} m` : '—'
-  const duracion = ruta.duracion_min != null ? `${ruta.duracion_min} min` : '—'
-
-  return `
-    <div class="ruta-popup" data-ruta-id="${escapeHtml(ruta.id)}">
-      <h3>${escapeHtml(ruta.nombre)}</h3>
-      <dl>
-        <dt>Distancia</dt><dd>${ruta.distancia_km} km</dd>
-        <dt>Desnivel</dt><dd>${desnivel}</dd>
-        <dt>Duración</dt><dd>${duracion}</dd>
-        <dt>Tipo</dt><dd>${tipo}</dd>
-        <dt>Fecha</dt><dd>${formatearFecha(ruta.fecha)}</dd>
-        <dt>Dificultad</dt><dd>${escapeHtml(ruta.dificultad)}</dd>
-      </dl>
-      ${ruta.pendienteSync ? '<p class="ruta-popup-pendiente">Pendiente de sincronizar</p>' : ''}
-      ${ruta.notas ? `<p class="ruta-popup-notas">${escapeHtml(ruta.notas)}</p>` : ''}
-      <div class="ruta-popup-foto" data-foto-path="${ruta.foto_path ? escapeHtml(ruta.foto_path) : ''}">
-        ${ruta.foto_path ? 'Cargando foto…' : ''}
-      </div>
-      ${
-        conAcciones
-          ? '<div class="ruta-popup-acciones">' +
-            '<button type="button" data-action="editar">Editar</button>' +
-            '<button type="button" data-action="borrar">Borrar</button>' +
-            '</div>'
-          : ''
-      }
-    </div>
-  `
-}
-
-/**
- * Recoloca el popup (tamaño + posición + autoPan) sin regenerar su
- * contenido. Popup.update() público SÍ regenera el contenido desde el
- * string original (sobrescribiendo cualquier cambio manual del DOM, como
- * la foto que se inserta después de cargar), así que aquí se llama solo a
- * los pasos internos de recolocación, igual que hace update() salvo la
- * regeneración de contenido.
- */
-function reposicionarPopup(popup: L.Popup): void {
-  const interno = popup as unknown as {
-    _updateLayout?: () => void
-    _updatePosition?: () => void
-    _adjustPan?: () => void
-  }
-  interno._updateLayout?.()
-  interno._updatePosition?.()
-  interno._adjustPan?.()
-}
-
-async function cargarFotoEnPopup(popupEl: HTMLElement, popup: L.Popup): Promise<void> {
-  const fotoDiv = popupEl.querySelector<HTMLElement>('.ruta-popup-foto')
-  const fotoPath = fotoDiv?.dataset.fotoPath
-  if (!fotoDiv || !fotoPath) return
-
-  const urlCacheada = obtenerUrlCacheada(fotoPath)
-  if (urlCacheada) {
-    mostrarFotoEnDiv(fotoDiv, urlCacheada, popup)
-    return
-  }
-
-  if (!navigator.onLine) {
-    fotoDiv.textContent = 'Foto no disponible sin conexión.'
-    return
-  }
-
-  const { data, error } = await supabase.storage
-    .from(FOTOS_BUCKET)
-    .createSignedUrl(fotoPath, SIGNED_URL_TTL_SEGUNDOS)
-
-  if (error || !data) {
-    fotoDiv.textContent = 'No se pudo cargar la foto.'
-    return
-  }
-
-  guardarUrlCacheada(fotoPath, data.signedUrl, SIGNED_URL_TTL_SEGUNDOS)
-  mostrarFotoEnDiv(fotoDiv, data.signedUrl, popup)
-}
-
-function mostrarFotoEnDiv(fotoDiv: HTMLElement, url: string, popup: L.Popup): void {
-  const img = document.createElement('img')
-  img.alt = 'Foto de la ruta'
-  img.loading = 'lazy'
-  // El alto del popup cambia cuando la foto termina de cargar (antes solo
-  // tenía el texto "Cargando foto…"), así que hay que recolocarlo o puede
-  // quedar cortado contra el borde del mapa. reposicionarPopup() hace solo
-  // eso, sin tocar el contenido (a diferencia de popup.update()).
-  img.onload = () => reposicionarPopup(popup)
-  img.src = url
-  fotoDiv.replaceChildren(img)
-}
 
 export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletMap = {}) {
   const map = L.map(container, {
@@ -192,7 +82,21 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
       // El marcador con el popup abierto queda por encima de los vecinos
       // (p. ej. otro muy cercano en el mismo cluster desagrupado).
       marker.on('popupopen', () => marker.setZIndexOffset(Z_INDEX_POPUP_ABIERTO))
-      marker.on('popupclose', () => marker.setZIndexOffset(0))
+
+      // Limpieza del listener de Escape de aplicarAccesibilidadPopup() (ver
+      // abajo); una variable por marcador (cerrada sobre cada iteración del
+      // bucle), no compartida entre marcadores.
+      let limpiarAccesibilidadPopup: (() => void) | null = null
+      marker.on('popupclose', () => {
+        marker.setZIndexOffset(0)
+        limpiarAccesibilidadPopup?.()
+        limpiarAccesibilidadPopup = null
+        // Antes el foco se perdía al cerrar (quedaba en el propio DOM del
+        // popup, que Leaflet retira) o cambiaba a algo inesperado; sin esto
+        // un usuario de teclado se quedaba "perdido" tras cerrar. Se
+        // devuelve al propio marcador, que sigue siendo focalizable.
+        marker.getElement()?.focus()
+      })
 
       // Listener por marcador (no global): así cada popup tiene acceso por
       // closure a su propia "ruta" para las acciones de editar/borrar.
@@ -212,6 +116,11 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
 
         const popupEl = event.popup.getElement()
         if (!popupEl) return
+
+        // Accesibilidad: role="dialog" + aria-labelledby, mueve el foco al
+        // título y cierra con Escape (antes nada de esto pasaba — ver
+        // aplicarAccesibilidadPopup en rutaPopup.ts para el porqué).
+        limpiarAccesibilidadPopup = aplicarAccesibilidadPopup(popupEl, () => marker.closePopup())
 
         void cargarFotoEnPopup(popupEl, event.popup)
 
@@ -233,8 +142,7 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
    * que al cargar la app por primera vez. Respeta prefers-reduced-motion,
    * igual que flyToRoute. */
   function reiniciarVista(): void {
-    const prefiereMovimientoReducido = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (prefiereMovimientoReducido) {
+    if (prefiereMovimientoReducido()) {
       map.setView(CENTRO_ESPANA, ZOOM_INICIAL)
     } else {
       map.flyTo(CENTRO_ESPANA, ZOOM_INICIAL, { duration: DURACION_VUELO_SEGUNDOS })
@@ -258,7 +166,6 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
     }
 
     const zoomDestino = Math.min(ZOOM_RUTA, map.getMaxZoom())
-    const prefiereMovimientoReducido = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
     let destino = L.latLng(ruta.lat, ruta.lon)
     if (anchoPanelLateralPx > 0) {
@@ -267,7 +174,7 @@ export function useLeafletMap(container: HTMLElement, opciones: OpcionesLeafletM
       destino = map.unproject(puntoDesplazado, zoomDestino)
     }
 
-    if (prefiereMovimientoReducido) {
+    if (prefiereMovimientoReducido()) {
       map.setView(destino, zoomDestino)
       marker.openPopup()
       return

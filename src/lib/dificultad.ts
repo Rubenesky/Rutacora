@@ -2,5 +2,3 @@
 // EXACTAMENTE (con tilde) con el CHECK de supabase/schema.sql:
 //   check (dificultad in ('fácil', 'media', 'difícil'))
 export const DIFICULTADES = ['fácil', 'media', 'difícil'] as const
-
-export type DificultadValor = (typeof DIFICULTADES)[number]

@@ -1,6 +1,6 @@
 import { computed } from 'vue'
 import { useAuth } from './useAuth'
-import { useOfflineQueue } from './useOfflineQueue'
+import { pendientesDe, useOfflineQueue } from './useOfflineQueue'
 import { useRoutes } from './useRoutes'
 import type { Ruta } from '@/types/database.types'
 
@@ -21,15 +21,12 @@ export interface RutaConEstado extends Ruta {
  * que vuelva a entrar su propietario).
  */
 export function useVisibleRoutes() {
-  const { rutas, isLoading, errorMessage, mostrandoCache, fetchRutas } = useRoutes()
+  const { rutas, isLoading, errorMessage, fetchRutas } = useRoutes()
   const { pendientes } = useOfflineQueue()
   const { session } = useAuth()
 
   const rutasVisibles = computed<RutaConEstado[]>(() => {
-    const sesionUserId = session.value?.user.id
-    const pendientesPropios = sesionUserId
-      ? pendientes.value.filter((item) => item.propietarioUserId === sesionUserId)
-      : []
+    const pendientesPropios = pendientesDe(pendientes.value, session.value?.user.id)
 
     const idsABorrar = new Set(
       pendientesPropios.filter((item) => item.tipo === 'borrar').map((item) => item.id),
@@ -45,12 +42,10 @@ export function useVisibleRoutes() {
 
       const pendiente = pendientesGuardar.get(ruta.id)
       if (pendiente?.ruta) {
-        const fotoPath =
-          pendiente.accionFoto === 'quitar'
-            ? null
-            : pendiente.accionFoto === 'reemplazar'
-              ? ruta.foto_path // la subida real aún no ha pasado; se confirma al sincronizar
-              : ruta.foto_path
+        // Si accionFoto es 'reemplazar', la subida real aún no ha pasado;
+        // se confirma al sincronizar, así que de momento se mantiene la foto
+        // actual (igual que con 'mantener').
+        const fotoPath = pendiente.accionFoto === 'quitar' ? null : ruta.foto_path
         resultado.push({ ...ruta, ...pendiente.ruta, foto_path: fotoPath, pendienteSync: true })
         pendientesGuardar.delete(ruta.id)
       } else {
@@ -84,5 +79,5 @@ export function useVisibleRoutes() {
     return resultado
   })
 
-  return { rutasVisibles, isLoading, errorMessage, mostrandoCache, fetchRutas }
+  return { rutasVisibles, isLoading, errorMessage, fetchRutas }
 }

@@ -24,7 +24,7 @@ vi.mock('@/lib/supabaseClient', () => ({
 
 const MapView = (await import('./MapView.vue')).default
 const { useAuth } = await import('@/composables/useAuth')
-const { cerrarPanel } = (await import('@/composables/usePanelOverlay')).usePanelOverlay()
+const { abrirPanel, cerrarPanel } = (await import('@/composables/usePanelOverlay')).usePanelOverlay()
 
 function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -69,7 +69,7 @@ describe('MapView: botón flotante "Añadir ruta" según sesión', () => {
     await flushPromises()
     expect(wrapper.find('[aria-label="Añadir ruta"]').exists()).toBe(true)
 
-    await wrapper.vm.abrirPanelRutas()
+    abrirPanel('rutas')
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[aria-label="Añadir ruta"]').exists()).toBe(false)
 
@@ -77,14 +77,13 @@ describe('MapView: botón flotante "Añadir ruta" según sesión', () => {
     wrapper.unmount()
   })
 
-  it('expone abrirPanelRutas() y abrirFormularioNuevo() para la barra superior', async () => {
+  it('expone abrirFormularioNuevo() para la barra superior', async () => {
     const { session } = useAuth()
     session.value = { user: { id: 'user-1' } } as unknown as Session
 
     const wrapper = mount(MapView)
     await flushPromises()
 
-    expect(typeof wrapper.vm.abrirPanelRutas).toBe('function')
     expect(typeof wrapper.vm.abrirFormularioNuevo).toBe('function')
 
     wrapper.unmount()

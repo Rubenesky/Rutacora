@@ -124,9 +124,6 @@ onUnmounted(() => {
 })
 
 defineExpose({
-  abrirPanelRutas: () => {
-    abrirPanel('rutas')
-  },
   abrirFormularioNuevo: () => abrirFormulario(null),
   reiniciarVista: () => leafletMap?.reiniciarVista(),
 })

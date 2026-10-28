@@ -88,6 +88,7 @@ vi.mock('@/lib/supabaseClient', () => ({
 
 const MapView = (await import('./MapView.vue')).default
 const { useAuth } = await import('@/composables/useAuth')
+const { abrirPanel } = (await import('@/composables/usePanelOverlay')).usePanelOverlay()
 
 function flushPromises(vueltas = 3): Promise<void> {
   return (async () => {
@@ -133,7 +134,7 @@ async function abrirPopupDeFila(
   wrapper: VueWrapper<InstanceType<typeof MapView>>,
   nombre: string,
 ): Promise<void> {
-  await wrapper.vm.abrirPanelRutas()
+  abrirPanel('rutas')
   await wrapper.vm.$nextTick()
   const filas = wrapper.findAll('.fila-ruta')
   const fila = filas.find((f) => f.text().includes(nombre))

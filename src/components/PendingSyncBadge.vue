@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useAuth } from '@/composables/useAuth'
-import { useOfflineQueue } from '@/composables/useOfflineQueue'
+import { pendientesDe, useOfflineQueue } from '@/composables/useOfflineQueue'
 
 const { pendientes, retry } = useOfflineQueue()
 const { session } = useAuth()
@@ -15,11 +15,7 @@ function alternarExpandido(): void {
 // activa. Sin sesión no se listan nombres de ruta (podrían ser de otra
 // cuenta en un dispositivo compartido): solo un aviso genérico si hay
 // algo en la cola, sin detalle ni reintento (eso requiere sesión).
-const pendientesPropios = computed(() => {
-  const sesionUserId = session.value?.user.id
-  if (!sesionUserId) return []
-  return pendientes.value.filter((item) => item.propietarioUserId === sesionUserId)
-})
+const pendientesPropios = computed(() => pendientesDe(pendientes.value, session.value?.user.id))
 
 const hayPendientesDeOtraSesion = computed(
   () => !session.value && pendientes.value.length > 0,

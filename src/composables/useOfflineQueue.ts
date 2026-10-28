@@ -2,6 +2,7 @@ import { ref, toRaw } from 'vue'
 import { supabase } from '@/lib/supabaseClient'
 import { DIFICULTADES } from '@/lib/dificultad'
 import { FOTOS_BUCKET } from '@/lib/constantes'
+import { mismoUsuario } from '@/lib/mismoUsuario'
 import { invalidarUrlCacheada } from '@/lib/signedUrlCache'
 import {
   clearCola as clearColaDb,
@@ -208,7 +209,7 @@ async function syncOne(item: ColaItem): Promise<void> {
     // La sesión activa es de OTRA cuenta distinta de la que encoló este
     // item: no se toca ni se borra, se reintentará solo si/cuando vuelva
     // a entrar la cuenta propietaria.
-    if (item.propietarioUserId && item.propietarioUserId !== userId) {
+    if (item.propietarioUserId && !mismoUsuario(item.propietarioUserId, userId)) {
       await actualizarEstado(item.id, 'pendiente_login_otra_cuenta', null, false)
       return
     }
@@ -366,6 +367,21 @@ init()
 
 export function useOfflineQueue() {
   return { pendientes, saveRoute, deleteRoute, retry, syncAll, haySincronizacionEnCurso }
+}
+
+/**
+ * Filtra los pendientes de la cola que son del usuario con sesión activa
+ * (ninguno si no hay sesión). Antes esta misma lógica estaba duplicada en
+ * useVisibleRoutes.ts y PendingSyncBadge.vue, cada una con su propia
+ * comparación (una con === estricto); ahora ambas usan esta única función,
+ * que ya compara con mismoUsuario (sin distinguir mayúsculas/minúsculas).
+ */
+export function pendientesDe(
+  pendientesCola: ColaItem[],
+  sesionUserId: string | null | undefined,
+): ColaItem[] {
+  if (!sesionUserId) return []
+  return pendientesCola.filter((item) => mismoUsuario(item.propietarioUserId, sesionUserId))
 }
 
 /** Solo para tests. */

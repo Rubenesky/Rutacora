@@ -201,8 +201,18 @@ create policy "fotos-rutas: lectura pública"
     )
   );
 
--- Lectura con sesión: a nivel de bucket (no solo la propia carpeta), para
--- que con sesión se vean las fotos de todas las rutas, igual que sin ella.
+-- Lectura con sesión: a nivel de bucket completo (no solo la propia
+-- carpeta), para que con sesión se vean las fotos de todas las rutas.
+-- A diferencia de la política de "anon" de arriba, este using() NO
+-- lleva storage.allow_any_operation(...): el SELECT con sesión queda
+-- autorizado para CUALQUIER operación sobre el bucket completo,
+-- incluida storage.object.list (sí permite listar su contenido con
+-- .list(), al contrario de lo que el bloque de arriba busca evitar para
+-- "anon"). Es intencionado y no un descuido: hoy el único usuario
+-- autenticado es el propio editor del sitio (de confianza), así que no
+-- hace falta restringirle la operación como se hace con "anon" (que
+-- solo necesita las 3 operaciones de createSignedUrl/descarga
+-- autenticada directa).
 drop policy if exists "fotos-rutas: el propietario lee su carpeta" on storage.objects;
 drop policy if exists "fotos-rutas: lectura con sesión" on storage.objects;
 create policy "fotos-rutas: lectura con sesión"
