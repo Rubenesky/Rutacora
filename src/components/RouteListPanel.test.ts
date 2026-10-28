@@ -97,3 +97,57 @@ describe('RouteListPanel: botón "Exportar datos"', () => {
     wrapper.unmount()
   })
 })
+
+describe('RouteListPanel: atrapado de foco (role="dialog")', () => {
+  it('al abrir, el foco entra en el panel; al cerrar, vuelve al elemento que lo tenía antes', async () => {
+    const { session } = useAuth()
+    session.value = null
+
+    // Simula #boton-rutas de AppHeader.vue: es quien tiene el foco al abrir.
+    const botonRutas = document.createElement('button')
+    botonRutas.id = 'boton-rutas'
+    document.body.appendChild(botonRutas)
+    botonRutas.focus()
+    expect(document.activeElement).toBe(botonRutas)
+
+    // Montado cerrado: el componente permanece montado y alterna su v-if
+    // interno, así que el foco se mueve en la TRANSICIÓN de "abierto".
+    const wrapper = mount(RouteListPanel, {
+      props: { abierto: false, rutas: [crearRutaConEstado()] },
+      attachTo: document.body,
+    })
+    expect(document.activeElement).toBe(botonRutas)
+
+    await wrapper.setProps({ abierto: true })
+    const panel = wrapper.find('#panel-rutas').element
+    expect(panel.contains(document.activeElement)).toBe(true)
+    // El primer focalizable es el botón "Cerrar" de la cabecera.
+    expect(document.activeElement).toBe(wrapper.find('.panel-cerrar').element)
+
+    await wrapper.setProps({ abierto: false })
+    expect(wrapper.find('#panel-rutas').exists()).toBe(false)
+    expect(document.activeElement).toBe(botonRutas)
+
+    wrapper.unmount()
+    botonRutas.remove()
+  })
+
+  it('Tab desde el último elemento vuelve al primero (no se escapa al mapa)', async () => {
+    const { session } = useAuth()
+    session.value = null
+
+    const wrapper = mount(RouteListPanel, {
+      props: { abierto: false, rutas: [crearRutaConEstado()] },
+      attachTo: document.body,
+    })
+    await wrapper.setProps({ abierto: true })
+
+    const ultimo = wrapper.find('.fila-ruta')
+    ;(ultimo.element as HTMLElement).focus()
+    await ultimo.trigger('keydown', { key: 'Tab' })
+
+    expect(document.activeElement).toBe(wrapper.find('.panel-cerrar').element)
+
+    wrapper.unmount()
+  })
+})

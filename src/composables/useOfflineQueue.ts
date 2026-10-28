@@ -67,6 +67,40 @@ const sincronizando = new Set<string>()
 const haySincronizacionEnCurso = ref(false)
 let inicializado = false
 
+/** Nombre del canal para coordinar la cola entre pestañas (ver más abajo).
+ * Exportado solo para que los tests puedan abrir un canal "de otra pestaña"
+ * con el mismo nombre. */
+const CANAL_SINCRONIZACION = 'rutacora-cola-offline-sync'
+
+type MensajeSincronizacion = { tipo: 'inicio' | 'fin'; id: string }
+
+// Coordinación entre pestañas: "sincronizando" (igual que "pendientes") vive
+// en memoria POR PESTAÑA; la única fuente de datos compartida entre
+// pestañas es IndexedDB. Sin esto, si dos pestañas reciben el evento
+// "online" (o "visibilitychange") a la vez, cada una sincroniza el mismo
+// item en paralelo sin saber de la otra: no corrompe nada (los upsert/
+// delete por id ya son idempotentes, ver comentarios en sincronizarGuardado
+// y sincronizarBorrado) pero duplica peticiones a Supabase/Storage sin
+// necesidad. BroadcastChannel es una API nativa del navegador (sin
+// dependencias nuevas) que solo entrega mensajes a OTRAS pestañas/contextos
+// del mismo origen, nunca al propio emisor, así que no hace falta filtrar
+// los mensajes propios. Si el navegador no la soporta (comprobado con
+// "typeof"), simplemente no se coordina entre pestañas: se degrada al
+// comportamiento anterior sin romper nada.
+const canalSincronizacion: BroadcastChannel | null =
+  typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CANAL_SINCRONIZACION) : null
+
+canalSincronizacion?.addEventListener('message', (evento: MessageEvent<MensajeSincronizacion>) => {
+  const { tipo, id } = evento.data
+  if (tipo === 'inicio') {
+    sincronizando.add(id)
+    haySincronizacionEnCurso.value = true
+  } else {
+    sincronizando.delete(id)
+    haySincronizacionEnCurso.value = sincronizando.size > 0
+  }
+})
+
 function esDificultadValida(valor: string): valor is Dificultad {
   return (DIFICULTADES as readonly string[]).includes(valor)
 }
@@ -194,6 +228,7 @@ async function syncOne(item: ColaItem): Promise<void> {
   if (sincronizando.has(item.id)) return
   sincronizando.add(item.id)
   haySincronizacionEnCurso.value = true
+  canalSincronizacion?.postMessage({ tipo: 'inicio', id: item.id } satisfies MensajeSincronizacion)
 
   try {
     const userId = await obtenerUserIdActual()
@@ -241,6 +276,10 @@ async function syncOne(item: ColaItem): Promise<void> {
   } finally {
     sincronizando.delete(item.id)
     haySincronizacionEnCurso.value = sincronizando.size > 0
+    // Se avisa también en el caso de éxito y en el de error: a las demás
+    // pestañas solo les importa que YA NO está en curso (para dejar de
+    // respetar el mutex), no el resultado.
+    canalSincronizacion?.postMessage({ tipo: 'fin', id: item.id } satisfies MensajeSincronizacion)
   }
 }
 
@@ -354,6 +393,17 @@ function init(): void {
     void syncAll()
   })
 
+  // Reintento de respaldo: el evento "online" no siempre se dispara de forma
+  // fiable (portales cautivos, algunos navegadores móviles). Si el usuario
+  // vuelve a la pestaña/app y ya hay conexión, es una señal igual de válida
+  // de que puede haber llegado conectividad entre tanto, sin necesitar un
+  // temporizador periódico de respaldo.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && navigator.onLine) {
+      void syncAll()
+    }
+  })
+
   // Sincroniza las rutas "pendientes de login" al volver a iniciar sesión
   // (con la misma cuenta que las encoló; ver la comprobación en syncOne).
   supabase.auth.onAuthStateChange((event, newSession) => {
@@ -395,3 +445,7 @@ export async function _resetParaTests(): Promise<void> {
 /** Solo para tests: permite comprobar la clasificación de errores sin
  * depender de forzar esas condiciones de verdad en IndexedDB/Supabase. */
 export const _erroresParaTests = { esErrorDePermisos, esErrorDeCuota }
+
+/** Solo para tests: permite abrir un BroadcastChannel "de otra pestaña" con
+ * el mismo nombre para comprobar la coordinación entre pestañas. */
+export const _CANAL_SINCRONIZACION_PARA_TESTS = CANAL_SINCRONIZACION

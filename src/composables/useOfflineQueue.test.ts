@@ -3,6 +3,17 @@ import { vi } from 'vitest'
 import { getColaItems } from '@/lib/offlineDb'
 import type { Dificultad } from '@/types/database.types'
 
+/** Espera un ciclo del event loop: BroadcastChannel entrega los mensajes de
+ * forma asíncrona (nunca en el mismo tick del postMessage). Solo sirve para
+ * esperar algo que de verdad no tiene ninguna condición observable que
+ * comprobar (p. ej. "confirmar que NO pasó nada"); cuando SÍ hay algo
+ * observable, usa vi.waitFor en su lugar — un solo tick fijo es frágil bajo
+ * carga (confirmado: esta suite falla de forma intermitente al correr junto
+ * al resto de los ~290 tests del proyecto, aunque siempre pasa en solitario). */
+function esperarTick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 const { mockGetSession, mockUpload, mockUpsert, mockDeleteEq, mockRemove, mockOnAuthStateChange } =
   vi.hoisted(() => ({
     mockGetSession: vi.fn(),
@@ -26,7 +37,8 @@ vi.mock('@/lib/supabaseClient', () => ({
   },
 }))
 
-const { useOfflineQueue, _resetParaTests, _erroresParaTests } = await import('./useOfflineQueue')
+const { useOfflineQueue, _resetParaTests, _erroresParaTests, _CANAL_SINCRONIZACION_PARA_TESTS } =
+  await import('./useOfflineQueue')
 
 const MANTENER = { tipo: 'mantener' } as const
 const QUITAR = { tipo: 'quitar' } as const
@@ -381,5 +393,116 @@ describe('useOfflineQueue: deleteRoute (borrado por la cola, igual que el guarda
     await deleteRoute('ruta-1', 'user-1/ruta-1.jpg')
 
     expect(mockRemove).toHaveBeenCalledWith(['user-1/ruta-1.jpg'])
+  })
+})
+
+describe('useOfflineQueue: coordinación entre pestañas vía BroadcastChannel', () => {
+  it('avisa a otras pestañas cuando empieza y termina de sincronizar un item', async () => {
+    const otraPestana = new BroadcastChannel(_CANAL_SINCRONIZACION_PARA_TESTS)
+    const mensajes: Array<{ tipo: string; id: string }> = []
+    otraPestana.addEventListener('message', (evento) => mensajes.push(evento.data))
+
+    try {
+      const { saveRoute } = useOfflineQueue()
+      const id = await saveRoute({ ...inputBase }, MANTENER)
+
+      // vi.waitFor en vez de un solo tick fijo: reintenta la aserción hasta
+      // que pasa (o expira), así que no depende de que un único
+      // setTimeout(…, 0) baste bajo cualquier carga de CPU.
+      await vi.waitFor(() => {
+        expect(mensajes).toEqual([
+          { tipo: 'inicio', id },
+          { tipo: 'fin', id },
+        ])
+      })
+    } finally {
+      otraPestana.close()
+    }
+  })
+
+  it('si otra pestaña avisa que ya está sincronizando un item, esta pestaña no duplica la petición', async () => {
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { saveRoute, retry, haySincronizacionEnCurso } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, MANTENER)
+    expect(mockUpsert).toHaveBeenCalledTimes(1)
+    expect((await getColaItems())[0]?.estado).toBe('error')
+
+    const otraPestana = new BroadcastChannel(_CANAL_SINCRONIZACION_PARA_TESTS)
+    try {
+      // "Otra pestaña" avisa que ya está sincronizando este mismo item.
+      // haySincronizacionEnCurso refleja sincronizando.size > 0 en vivo: es
+      // la señal observable real de que el mensaje ya se procesó, más fiable
+      // que esperar un tick fijo bajo carga.
+      otraPestana.postMessage({ tipo: 'inicio', id })
+      await vi.waitFor(() => expect(haySincronizacionEnCurso.value).toBe(true))
+
+      mockUpsert.mockResolvedValueOnce({ data: null, error: null })
+      await retry(id)
+
+      // No se duplica la petición: sigue en 1, el mutex local respeta el aviso remoto.
+      expect(mockUpsert).toHaveBeenCalledTimes(1)
+      expect((await getColaItems())[0]?.estado).toBe('error')
+
+      // Cuando la otra pestaña avisa que terminó, esta vuelve a poder sincronizar.
+      otraPestana.postMessage({ tipo: 'fin', id })
+      await vi.waitFor(() => expect(haySincronizacionEnCurso.value).toBe(false))
+
+      await retry(id)
+      expect(mockUpsert).toHaveBeenCalledTimes(2)
+      expect(await getColaItems()).toHaveLength(0)
+    } finally {
+      otraPestana.close()
+    }
+  })
+})
+
+describe('useOfflineQueue: reintento de respaldo con visibilitychange', () => {
+  it('al volver a la pestaña con conexión, sincroniza igual que el evento "online"', async () => {
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { saveRoute } = useOfflineQueue()
+    const id = await saveRoute({ ...inputBase }, MANTENER)
+    expect((await getColaItems())[0]?.estado).toBe('error')
+
+    mockUpsert.mockResolvedValueOnce({ data: null, error: null })
+    Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    await vi.waitFor(() => expect(mockUpsert).toHaveBeenCalledTimes(2))
+    expect(await getColaItems()).toHaveLength(0)
+    expect(id).toBeTruthy()
+  })
+
+  it('si no hay conexión, volver a la pestaña NO dispara una sincronización', async () => {
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase }, MANTENER)
+    expect(mockUpsert).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await esperarTick()
+
+    expect(mockUpsert).toHaveBeenCalledTimes(1)
+    expect((await getColaItems())[0]?.estado).toBe('error')
+  })
+
+  it('si la pestaña pasa a oculta (aunque haya conexión), no dispara una sincronización', async () => {
+    mockUpsert.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { saveRoute } = useOfflineQueue()
+    await saveRoute({ ...inputBase }, MANTENER)
+    expect(mockUpsert).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await esperarTick()
+
+    expect(mockUpsert).toHaveBeenCalledTimes(1)
   })
 })

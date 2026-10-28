@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import { ordenarRutas, type CriterioOrden, type DireccionOrden } from '@/lib/ordenarRutas'
 import { guardarOrdenElegido, leerOrdenGuardado } from '@/lib/preferenciaOrdenRutas'
 import { descargarExportacion } from '@/lib/exportarRutas'
 import { mismoUsuario } from '@/lib/mismoUsuario'
 import { formatearFecha } from '@/lib/rutaPopup'
 import { useAuth } from '@/composables/useAuth'
+import { useFocusTrap } from '@/composables/useFocusTrap'
 import { useInstallPrompt } from '@/composables/useInstallPrompt'
 import { useRoutes } from '@/composables/useRoutes'
 import type { RutaConEstado } from '@/composables/useVisibleRoutes'
@@ -33,6 +34,13 @@ const emit = defineEmits<{
   cerrar: []
   seleccionar: [ruta: RutaConEstado]
 }>()
+
+// Este componente permanece montado y alterna su propio v-if="abierto", así
+// que el atrapado de foco se activa observando la prop (no con onMounted):
+// al abrir, el foco entra al panel; al cerrar, vuelve a quien lo tenía
+// (normalmente #boton-rutas, el único que abre este panel).
+const panelRef = ref<HTMLElement | null>(null)
+useFocusTrap(panelRef, toRef(props, 'abierto'))
 
 const ordenGuardado = leerOrdenGuardado()
 const criterio = ref<CriterioOrden>(ordenGuardado.criterio)
@@ -66,6 +74,7 @@ function onSeleccionar(ruta: RutaConEstado): void {
   <div
     v-if="abierto"
     id="panel-rutas"
+    ref="panelRef"
     class="panel-rutas"
     role="dialog"
     aria-label="Lista de rutas"

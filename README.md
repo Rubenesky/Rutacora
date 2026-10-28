@@ -176,6 +176,33 @@ rollback;
 select public from storage.buckets where id = 'fotos-rutas';
 ```
 
+**`public.rutas.user_id` tiene foreign key a `auth.users(id)`** (sin `on delete`,
+es decir `NO ACTION`: a propósito, para impedir borrar el usuario editor
+mientras tenga rutas en vez de borrarlas o dejarlas huérfanas en silencio).
+
+```sql
+-- Debe devolver una fila con confdeltype = 'a' (NO ACTION) y confrelid
+-- apuntando a auth.users:
+select conname, confdeltype, confrelid::regclass
+from pg_constraint
+where conrelid = 'public.rutas'::regclass
+  and contype = 'f';
+```
+
+**Bucket `fotos-rutas` con `file_size_limit` (2 MB) y `allowed_mime_types`
+(solo JPEG).** Esto es solo una comprobación de que la *configuración* quedó
+bien guardada, no de que Storage la haga cumplir de verdad: para eso haría
+falta subir un archivo real que no sea JPEG o que supere 2 MB y comprobar
+que la API de Storage lo rechaza, algo que no he podido hacer (no tengo
+acceso a tu proyecto).
+
+```sql
+-- Debe devolver file_size_limit = 2097152 y allowed_mime_types = {image/jpeg}:
+select file_size_limit, allowed_mime_types
+from storage.buckets
+where id = 'fotos-rutas';
+```
+
 Que `anon` no puede **listar** el bucket (solo leer un archivo conocido por su ruta) se comprueba a nivel de API de Storage, no con SQL directo: una petición a `POST {VITE_SUPABASE_URL}/storage/v1/object/list/fotos-rutas` con la `anon key` como `apikey`/`Authorization` debe devolver un error, mientras que descargar una URL firmada generada por la app sí debe funcionar.
 
 **Regresión: `anon` debe poder generar una URL firmada (`createSignedUrl`).** Esto falló en producción (cualquier visitante sin sesión recibía "No se pudo cargar la foto." siempre, con cualquier ruta) porque la política de `anon` solo cubría las operaciones de descarga autenticada directa (`object.get_authenticated(_info)`), no la de firmado (`object.sign`, la que usa `createSignedUrl`) — ver el comentario junto a esa política en `schema.sql`. La API de Storage simula la operación real mediante el GUC `storage.operation` (ver `storage.operation()` y `storage.allow_any_operation()` en los migrations de `supabase/storage`), así que puede reproducirse sin hacer ninguna petición HTTP real:

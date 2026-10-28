@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { DIFICULTADES } from '@/lib/dificultad'
 import { obtenerUrlFoto } from '@/lib/obtenerUrlFoto'
 import { ErrorFoto, procesarFoto } from '@/lib/procesarFoto'
-import { hayErrores, validarRuta } from '@/lib/validacionRuta'
+import { hayErrores, validarRuta, type ErroresRuta } from '@/lib/validacionRuta'
 import { usePanelOverlay } from '@/composables/usePanelOverlay'
+import { useFocusTrap } from '@/composables/useFocusTrap'
 import type { AccionFoto, GuardarRutaInput } from '@/composables/useOfflineQueue'
 import type { Ruta } from '@/types/database.types'
 
@@ -119,6 +120,13 @@ onUnmounted(() => registrarConfirmacionCierre('formulario', null))
 
 onUnmounted(liberarPreviewNueva)
 
+// Atrapa el foco dentro del diálogo (role="dialog" + aria-modal="true"). El
+// padre (MapView.vue) monta este componente con v-if="formAbierto", así que
+// mientras exista está abierto: "activo" es un ref(true) fijo y useFocusTrap
+// se encarga de entrar al montar y devolver el foco al desmontar.
+const dialogoRef = ref<HTMLElement | null>(null)
+useFocusTrap(dialogoRef, ref(true))
+
 watch(
   () => props.lat,
   (valor) => {
@@ -225,6 +233,41 @@ function calcularAccionFoto(): AccionFoto {
   return { tipo: 'mantener' }
 }
 
+// Latitud/longitud comparten dos posibles mensajes: el de geolocalización
+// ("Usar mi ubicación" falló) y el de validación al guardar.
+const describedbyUbicacion = computed(() => {
+  const ids = [
+    errorUbicacion.value ? 'error-ubicacion-gps' : null,
+    errores.value.ubicacion ? 'error-ubicacion' : null,
+  ].filter((id): id is string => id !== null)
+  return ids.length > 0 ? ids.join(' ') : undefined
+})
+
+// Orden visual (de arriba a abajo) de los campos validados, con el id del
+// elemento que debe recibir el foco si ese campo tiene error. Para grupos
+// (ubicación, dificultad) se enfoca el primer control del grupo.
+const ORDEN_CAMPOS_CON_ERROR: ReadonlyArray<[keyof ErroresRuta, string]> = [
+  ['nombre', 'campo-nombre'],
+  ['ubicacion', 'campo-lat'],
+  ['distancia_km', 'campo-distancia'],
+  ['desnivel_m', 'campo-desnivel'],
+  ['duracion_min', 'campo-duracion'],
+  ['fecha', 'campo-fecha'],
+  ['dificultad', 'campo-dificultad-0'],
+]
+
+// Al pulsar "Guardar" con errores, lleva el foco al primer campo inválido
+// (WCAG 3.3.1): antes no pasaba nada visible para un usuario de teclado o
+// lector de pantalla. Se espera a nextTick para que el mensaje de error y el
+// aria-describedby ya estén en el DOM y el lector lea el error al enfocar.
+function enfocarPrimerCampoConError(): void {
+  const primero = ORDEN_CAMPOS_CON_ERROR.find(([clave]) => errores.value[clave])
+  if (!primero) return
+  void nextTick(() => {
+    dialogoRef.value?.querySelector<HTMLElement>(`#${primero[1]}`)?.focus()
+  })
+}
+
 function onGuardar(): void {
   const datos = {
     nombre: nombre.value,
@@ -238,7 +281,10 @@ function onGuardar(): void {
   }
 
   errores.value = validarRuta(datos)
-  if (hayErrores(errores.value)) return
+  if (hayErrores(errores.value)) {
+    enfocarPrimerCampoConError()
+    return
+  }
 
   emit(
     'guardar',
@@ -262,13 +308,17 @@ function onGuardar(): void {
 
 <template>
   <div
+    ref="dialogoRef"
     class="modal-overlay"
     role="dialog"
     aria-modal="true"
+    aria-labelledby="titulo-formulario-ruta"
   >
     <div class="modal-sheet">
       <header class="modal-header">
-        <h2>{{ esEdicion ? 'Editar ruta' : 'Añadir ruta' }}</h2>
+        <h2 id="titulo-formulario-ruta">
+          {{ esEdicion ? 'Editar ruta' : 'Añadir ruta' }}
+        </h2>
         <button
           type="button"
           class="modal-cerrar"
@@ -289,9 +339,13 @@ function onGuardar(): void {
           v-model="nombre"
           type="text"
           autocomplete="off"
+          :aria-invalid="!!errores.nombre"
+          :aria-describedby="errores.nombre ? 'error-nombre' : undefined"
         >
         <p
           v-if="errores.nombre"
+          id="error-nombre"
+          role="alert"
           class="campo-error"
         >
           {{ errores.nombre }}
@@ -312,6 +366,8 @@ function onGuardar(): void {
                 type="number"
                 inputmode="decimal"
                 step="any"
+                :aria-invalid="!!errores.ubicacion"
+                :aria-describedby="describedbyUbicacion"
                 @change="onLatInput"
               >
             </div>
@@ -323,6 +379,8 @@ function onGuardar(): void {
                 type="number"
                 inputmode="decimal"
                 step="any"
+                :aria-invalid="!!errores.ubicacion"
+                :aria-describedby="describedbyUbicacion"
                 @change="onLonInput"
               >
             </div>
@@ -331,6 +389,7 @@ function onGuardar(): void {
           <button
             type="button"
             :disabled="obteniendoUbicacion"
+            :aria-describedby="errorUbicacion ? 'error-ubicacion-gps' : undefined"
             @click="usarMiUbicacion"
           >
             {{ obteniendoUbicacion ? 'Obteniendo ubicación…' : 'Usar mi ubicación' }}
@@ -338,12 +397,16 @@ function onGuardar(): void {
 
           <p
             v-if="errorUbicacion"
+            id="error-ubicacion-gps"
+            role="alert"
             class="campo-error"
           >
             {{ errorUbicacion }}
           </p>
           <p
             v-if="errores.ubicacion"
+            id="error-ubicacion"
+            role="alert"
             class="campo-error"
           >
             {{ errores.ubicacion }}
@@ -378,10 +441,14 @@ function onGuardar(): void {
             Se quitará la foto al guardar.
           </p>
 
+          <label for="campo-foto">Foto de la ruta</label>
           <input
+            id="campo-foto"
             type="file"
             accept="image/*"
             :disabled="procesandoFoto"
+            :aria-invalid="!!errorFoto"
+            :aria-describedby="errorFoto ? 'error-foto' : undefined"
             @change="onArchivoSeleccionado"
           >
 
@@ -394,14 +461,24 @@ function onGuardar(): void {
             Quitar foto
           </button>
 
-          <p
-            v-if="procesandoFoto"
-            class="ayuda"
+          <!-- La región de estado existe siempre (solo cambia su contenido):
+               los lectores de pantalla solo anuncian de forma fiable los
+               cambios dentro de una región viva ya presente en el DOM. -->
+          <div
+            role="status"
+            class="estado-foto"
           >
-            Procesando foto…
-          </p>
+            <p
+              v-if="procesandoFoto"
+              class="ayuda"
+            >
+              Procesando foto…
+            </p>
+          </div>
           <p
             v-if="errorFoto"
+            id="error-foto"
+            role="alert"
             class="campo-error"
           >
             {{ errorFoto }}
@@ -416,9 +493,13 @@ function onGuardar(): void {
           inputmode="decimal"
           step="0.1"
           min="0"
+          :aria-invalid="!!errores.distancia_km"
+          :aria-describedby="errores.distancia_km ? 'error-distancia' : undefined"
         >
         <p
           v-if="errores.distancia_km"
+          id="error-distancia"
+          role="alert"
           class="campo-error"
         >
           {{ errores.distancia_km }}
@@ -433,9 +514,13 @@ function onGuardar(): void {
               type="number"
               inputmode="numeric"
               min="0"
+              :aria-invalid="!!errores.desnivel_m"
+              :aria-describedby="errores.desnivel_m ? 'error-desnivel' : undefined"
             >
             <p
               v-if="errores.desnivel_m"
+              id="error-desnivel"
+              role="alert"
               class="campo-error"
             >
               {{ errores.desnivel_m }}
@@ -449,9 +534,13 @@ function onGuardar(): void {
               type="number"
               inputmode="numeric"
               min="0"
+              :aria-invalid="!!errores.duracion_min"
+              :aria-describedby="errores.duracion_min ? 'error-duracion' : undefined"
             >
             <p
               v-if="errores.duracion_min"
+              id="error-duracion"
+              role="alert"
               class="campo-error"
             >
               {{ errores.duracion_min }}
@@ -483,21 +572,33 @@ function onGuardar(): void {
           id="campo-fecha"
           v-model="fecha"
           type="date"
+          :aria-invalid="!!errores.fecha"
+          :aria-describedby="errores.fecha ? 'error-fecha' : undefined"
         >
         <p
           v-if="errores.fecha"
+          id="error-fecha"
+          role="alert"
           class="campo-error"
         >
           {{ errores.fecha }}
         </p>
 
-        <fieldset class="campo-radio">
+        <!-- role="radiogroup" porque aria-invalid no está soportado en un
+             group genérico (el rol implícito de <fieldset>) ni en cada radio. -->
+        <fieldset
+          class="campo-radio"
+          role="radiogroup"
+          :aria-invalid="!!errores.dificultad"
+          :aria-describedby="errores.dificultad ? 'error-dificultad' : undefined"
+        >
           <legend>Dificultad</legend>
           <label
-            v-for="valor in DIFICULTADES"
+            v-for="(valor, indice) in DIFICULTADES"
             :key="valor"
           >
             <input
+              :id="`campo-dificultad-${indice}`"
               v-model="dificultad"
               type="radio"
               :value="valor"
@@ -507,6 +608,8 @@ function onGuardar(): void {
         </fieldset>
         <p
           v-if="errores.dificultad"
+          id="error-dificultad"
+          role="alert"
           class="campo-error"
         >
           {{ errores.dificultad }}
@@ -630,6 +733,12 @@ function onGuardar(): void {
 
 .campo-foto input[type='file'] {
   min-height: var(--tap-min);
+}
+
+/* La región role="status" está siempre montada; vacía, anula el hueco del
+   gap del flex para no añadir espacio visual. */
+.estado-foto:empty {
+  margin-top: calc(-1 * var(--space-1));
 }
 
 .foto-preview img {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuth } from '@/composables/useAuth'
+import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const emit = defineEmits<{
   cerrar: []
@@ -12,6 +13,13 @@ const email = ref('')
 const password = ref('')
 const errorMessage = ref('')
 const isSubmitting = ref(false)
+
+// Atrapa Tab/Shift+Tab dentro del diálogo y devuelve el foco al botón que
+// lo abrió al cerrarse (antes se escapaba al mapa de fondo). App.vue monta
+// y desmonta este componente con v-if, así que mientras exista está
+// siempre abierto: "activo" puede ser un ref(true) fijo.
+const dialogoRef = ref<HTMLElement | null>(null)
+useFocusTrap(dialogoRef, ref(true))
 
 async function onSubmit(): Promise<void> {
   errorMessage.value = ''
@@ -29,6 +37,7 @@ async function onSubmit(): Promise<void> {
 
 <template>
   <div
+    ref="dialogoRef"
     class="modal-overlay"
     role="dialog"
     aria-modal="true"

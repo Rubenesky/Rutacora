@@ -47,6 +47,24 @@ comment on table public.rutas is 'Rutas de senderismo. Lectura pública; escritu
 create index if not exists rutas_user_id_idx on public.rutas (user_id);
 create index if not exists rutas_fecha_idx on public.rutas (fecha desc);
 
+-- Foreign key de user_id -> auth.users(id). Sin "on delete": el valor por
+-- defecto de Postgres es "NO ACTION", que es el más seguro aquí (impide
+-- borrar el usuario editor mientras tenga rutas, en vez de borrar en
+-- cascada o dejar rutas públicas con un user_id huérfano sin más aviso).
+-- Es intencionado: hoy solo existe un usuario editor, de confianza, y
+-- borrarlo por accidente sin querer también borrar/huerfanizar sus rutas
+-- es justo el error que esta FK evita. Postgres no tiene una sintaxis
+-- nativa "add constraint if not exists", así que se envuelve en un bloque
+-- "do" que ignora el error si la constraint ya existe (idempotente).
+do $$
+begin
+  alter table public.rutas
+    add constraint rutas_user_id_fkey
+    foreign key (user_id) references auth.users (id);
+exception
+  when duplicate_object then null;
+end $$;
+
 alter table public.rutas enable row level security;
 
 -- --- Lectura pública (anon): solo las columnas no sensibles ---------
@@ -164,9 +182,22 @@ grant select on table public.keepalive to anon;
 -- de Postgres adicional para Storage (confirmado: el cambio de grants por
 -- defecto de Supabase no afecta a storage.objects).
 -- Fuente: https://supabase.com/docs/guides/storage/security/access-control
-insert into storage.buckets (id, name, public)
-values ('fotos-rutas', 'fotos-rutas', false)
-on conflict (id) do update set public = false;
+--
+-- file_size_limit / allowed_mime_types: el cliente (src/lib/procesarFoto.ts,
+-- TECHO_BYTES) siempre recomprime a JPEG con un techo de 0.5 MB antes de
+-- subir, pero eso es solo una convención del cliente: nada a nivel de
+-- Storage lo hacía cumplir, así que una subida que se saltara ese paso
+-- (otro cliente, un error, una versión futura) podría subir cualquier tipo
+-- o tamaño de archivo sin que nada lo impidiera. El límite aquí es de 2 MB
+-- (2097152 bytes), con margen sobre el techo de 0.5 MB del cliente a
+-- propósito (no un valor idéntico), para no romper si ese techo cambia
+-- ligeramente en el futuro sin tener que tocar también el esquema.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('fotos-rutas', 'fotos-rutas', false, 2097152, array['image/jpeg'])
+on conflict (id) do update set
+  public = false,
+  file_size_limit = 2097152,
+  allowed_mime_types = array['image/jpeg'];
 
 -- Lectura pública (anon): patrón oficial de Supabase para dar lectura a
 -- un bucket privado SIN permitir listar su contenido (storage.allow_any_
